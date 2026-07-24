@@ -1,0 +1,6 @@
+# Mechatron Prime CI build targets for collation_mf_do_you_speak_it.
+# One valid flake attribute per line (verified via `nix flake show`).
+# The Thelio worker builds these on each signed push to yolo/master/main.
+packages.x86_64-linux.default
+checks.x86_64-linux.build
+checks.x86_64-linux.test

@@ -1,6 +1,6 @@
 # collation_mf_do_you_speak_it
 
-[![Garnix](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fgarnix.io%2Fapi%2Fbadges%2Fpmarreck%2Fcollation_mf_do_you_speak_it%3Fbranch%3Dyolo)](https://garnix.io/repo/pmarreck/collation_mf_do_you_speak_it)
+[![Mechatron Prime CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fthelio-nixos.tail66c90.ts.net%2Fbadges%2Fcollation_mf_do_you_speak_it.json&style=for-the-badge)](https://thelio-nixos.tail66c90.ts.net/mechatron-prime/)
 
 A small, **fast**, **opinionated**, cross-platform, **reproducible** string
 collation / sorting library that ships its own versioned ordering and **ignores
@@ -52,10 +52,13 @@ Native Linux builds are fully static (musl), so the binary runs anywhere.
 ```sh
 collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
 
-  -c, --code-point   Pure UTF-8 byte order (== LC_ALL=C sort)
-  -h, --help         Show help
-      --about        One-line version + platform
-      --version      Library version
+  -t, --field-separator <SEP>  Split each line on SEP (default: whole line)
+  -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line
+  -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)
+  -h, --help                   Show help
+      --about                  One-line version + platform
+      --version                Library version
+      --lang <code>            UI language for --help/--about (e.g. en, de)
 ```
 
 `FILE` may be `-` or `@stdin` for standard input (the default).
@@ -67,6 +70,26 @@ printf 'file10\nfile2\nApple\napple\n' | collate
 # file2
 # file10
 ```
+
+### Field sorting (`-t` / `-k`)
+
+Sort by a chosen field, like `sort -t -k`. The separator may be multi-character;
+a missing field sorts as empty. `COLLATE_FIELD_SEP` sets a default separator
+(overridden by `-t`); a separator with no `-k` sorts by field 1.
+
+```sh
+printf 'a:3\nb:1\nc:2\n' | collate -t: -k2
+# b:1
+# c:2
+# a:3
+```
+
+### Language (`--lang`, prepare-phase i18n)
+
+`--help`/`--about` are localizable. Precedence: `--lang <code>` overrides
+`COLLATION_MF_LANG`, which overrides `LANG`/`LC_*`; English is the default and
+fallback. Today only `en` and a `de` demonstration locale ship (full coverage is
+future work). Localized aliases: `--hilfe` (German help), `--sprache` (= `--lang`).
 
 ## C FFI (the real public API)
 
@@ -83,6 +106,34 @@ collation_mf_close(c);
 
 Plus POSIX-shaped drop-ins: `collation_mf_strcoll(a, b)` and
 `collation_mf_strxfrm(dst, src, n)`.
+
+## Benchmarks
+
+Run `./bm` (uses `hyperfine` from the dev shell; logs to
+`bench/<machine-id>.ndjson`). It compares `collate` against independent oracles
+and runs a machine-independent scaling gate.
+
+Measured — 50,000 realistic mixed lines, AMD Threadripper 3990X, hyperfine median:
+
+| contestant | median | vs `collate` (house) |
+|---|--:|--:|
+| `sort` (`LC_ALL=C`, byte order) | 21.96 ms | **0.41×** (faster) |
+| `collate --code-point` | 39.19 ms | 0.73× |
+| `collate` (house style) | 53.46 ms | 1.00× |
+| glibc `strcoll` (`en_US.UTF-8`) | 78.77 ms | 1.47× (collate faster) |
+| `sort` (`en_US.UTF-8`) | 86.30 ms | 1.61× (collate faster) |
+| ICU `ucol_getSortKey` (`en_US`) | *see `./bm`* | — |
+
+**Honest verdict:** `collate` is **not** faster than coreutils' byte sort
+(`LC_ALL=C sort`) — that's a mergesort doing trivial `memcmp`, and `collate`
+does more work (multi-level keys). But `collate`'s opinionated house style is
+**~1.5× faster than glibc locale collation** *and* reproducible across
+glibc/musl/macOS/Windows, which locale collation is not. Use `--code-point` when
+you want raw byte order and it's still within ~1.8× of `sort -C`.
+
+**Scaling gate:** the sort path is `O(n log n)`; the gate runs it at N, 2N, 4N,
+8N and fails on a super-linear (≥ 3×-per-doubling) regression. Measured ratios:
+1.80 / 2.04 / 2.10 — clean `O(n log n)`.
 
 ## Architecture
 
