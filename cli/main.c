@@ -64,10 +64,15 @@ static int print_help(void) {
         "  diacritics as a secondary tie-break (café near cafe, not after z)\n"
         "\n"
         "Options:\n"
-        "  -c, --code-point   Pure UTF-8 byte order (== LC_ALL=C sort)\n"
-        "  -h, --help         Show this help\n"
-        "      --about        Print one-line version + platform\n"
-        "      --version      Print the library version\n",
+        "  -t, --field-separator <SEP>  Split each line on SEP (default: whole line)\n"
+        "  -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line\n"
+        "  -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)\n"
+        "  -h, --help                   Show this help\n"
+        "      --about                  Print one-line version + platform\n"
+        "      --version                Print the library version\n"
+        "\n"
+        "Environment:\n"
+        "  COLLATE_FIELD_SEP            Default field separator (overridden by -t)\n",
         stdout);
     return 0;
 }
@@ -141,7 +146,46 @@ static int cmp_rows(const void *pa, const void *pb) {
     return 0;
 }
 
-static int cmd_sort(const char *path, uint32_t options) {
+/* Locate the (1-based) Nth field of `line` when split on the `sep` substring,
+ * returning the field's [ptr,len) via out-params. With no separator (sep NULL
+ * or empty) or n < 1, the whole line is the field. A line with fewer than n
+ * fields yields an empty field (sorts as empty — first). Naive substring search
+ * (separators are short in practice). Kept in the C CLI so the Zig core stays
+ * field-agnostic — the hexagonal boundary is preserved. */
+static void extract_field(const uint8_t *line, size_t line_len,
+                          const char *sep, size_t sep_len, long n,
+                          const uint8_t **fptr, size_t *flen) {
+    if (!sep || sep_len == 0 || n < 1) {
+        *fptr = line;
+        *flen = line_len;
+        return;
+    }
+    size_t field_start = 0;
+    for (long field = 1; field < n; field++) {
+        const uint8_t *hit = NULL;
+        for (size_t i = field_start; i + sep_len <= line_len; i++) {
+            if (memcmp(line + i, sep, sep_len) == 0) { hit = line + i; break; }
+        }
+        if (!hit) { /* fewer than n fields => empty field */
+            *fptr = line + line_len;
+            *flen = 0;
+            return;
+        }
+        field_start = (size_t)(hit - line) + sep_len;
+    }
+    for (size_t i = field_start; i + sep_len <= line_len; i++) {
+        if (memcmp(line + i, sep, sep_len) == 0) {
+            *fptr = line + field_start;
+            *flen = i - field_start;
+            return;
+        }
+    }
+    *fptr = line + field_start;
+    *flen = (field_start <= line_len) ? (line_len - field_start) : 0;
+}
+
+static int cmd_sort(const char *path, uint32_t options,
+                    const char *sep, size_t sep_len, long key_field) {
     FILE *f = stdin;
     int close_f = 0;
     if (path && strcmp(path, "-") != 0 && strcmp(path, "@stdin") != 0) {
@@ -197,15 +241,20 @@ static int cmd_sort(const char *path, uint32_t options) {
         if (at_end || data[i] == '\n') {
             const uint8_t *line = data + start;
             size_t line_len = i - start;
+            /* The sort key is computed from the chosen FIELD (whole line when no
+             * separator is configured); the original line is still emitted. */
+            const uint8_t *ksrc;
+            size_t ksrc_len;
+            extract_field(line, line_len, sep, sep_len, key_field, &ksrc, &ksrc_len);
             /* Safe upper bound on key length: 6 bytes/input byte + structural. */
-            size_t cap = line_len * 6 + 16;
+            size_t cap = ksrc_len * 6 + 16;
             uint8_t *key = (uint8_t *)malloc(cap);
             if (!key) {
                 exit_code = 1;
                 fputs("collate: out of memory\n", stderr);
                 break;
             }
-            size_t need = collation_mf_get_sort_key(coll, line, line_len, key, cap);
+            size_t need = collation_mf_get_sort_key(coll, ksrc, ksrc_len, key, cap);
             if (need > cap) {
                 uint8_t *nk = (uint8_t *)realloc(key, need);
                 if (!nk) {
@@ -215,7 +264,7 @@ static int cmd_sort(const char *path, uint32_t options) {
                     break;
                 }
                 key = nk;
-                need = collation_mf_get_sort_key(coll, line, line_len, key, need);
+                need = collation_mf_get_sort_key(coll, ksrc, ksrc_len, key, need);
             }
             rows[idx].line = line;
             rows[idx].line_len = line_len;
@@ -246,7 +295,11 @@ int main(int argc, char *argv[]) {
 
     uint32_t options = 0;
     const char *path = NULL;
-    int only_switches = 0; /* set once we see "--" */
+    const char *sep = NULL; /* field separator (NULL => whole line) */
+    long key_field = 0;     /* 1-based field for -k; 0 => unset */
+    int key_set = 0;        /* explicit -k/--key seen */
+    int sep_from_flag = 0;  /* -t/--field-separator seen (overrides env) */
+    int only_switches = 0;  /* set once we see "--" */
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -265,6 +318,55 @@ int main(int argc, char *argv[]) {
                 return 0;
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
                 options |= COLLATION_MF_CODE_POINT;
+            } else if (strcmp(a, "--field-separator") == 0) {
+                if (i + 1 >= argc) {
+                    fputs("collate: --field-separator requires an argument\n", stderr);
+                    return 2;
+                }
+                sep = argv[++i];
+                sep_from_flag = 1;
+            } else if (strncmp(a, "--field-separator=", 18) == 0) {
+                sep = a + 18;
+                sep_from_flag = 1;
+            } else if (a[1] == 't') { /* -t or -tSEP (SEP may be empty=>whole line) */
+                if (a[2] != '\0') {
+                    sep = a + 2;
+                } else if (i + 1 < argc) {
+                    sep = argv[++i];
+                } else {
+                    fputs("collate: -t requires an argument\n", stderr);
+                    return 2;
+                }
+                sep_from_flag = 1;
+            } else if (strcmp(a, "--key") == 0 || strncmp(a, "--key=", 6) == 0 ||
+                       a[1] == 'k') {
+                const char *val;
+                if (strcmp(a, "--key") == 0) {
+                    if (i + 1 >= argc) {
+                        fputs("collate: --key requires an argument\n", stderr);
+                        return 2;
+                    }
+                    val = argv[++i];
+                } else if (strncmp(a, "--key=", 6) == 0) {
+                    val = a + 6;
+                } else { /* -k or -kN */
+                    if (a[2] != '\0') {
+                        val = a + 2;
+                    } else if (i + 1 < argc) {
+                        val = argv[++i];
+                    } else {
+                        fputs("collate: -k requires an argument\n", stderr);
+                        return 2;
+                    }
+                }
+                char *endp;
+                long v = strtol(val, &endp, 10);
+                if (*val == '\0' || *endp != '\0' || v < 1) {
+                    fprintf(stderr, "collate: invalid field number '%s'\n", val);
+                    return 2;
+                }
+                key_field = v;
+                key_set = 1;
             } else {
                 fprintf(stderr, "collate: unknown option '%s' (try --help)\n", a);
                 return 2;
@@ -279,5 +381,21 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    return cmd_sort(path, options);
+    /* Field separator precedence: -t/--field-separator wins; else the
+     * COLLATE_FIELD_SEP env default; else whole-line (IFS-style). */
+    if (!sep_from_flag) {
+        const char *env = getenv("COLLATE_FIELD_SEP");
+        if (env && env[0] != '\0') sep = env;
+    }
+    size_t sep_len = sep ? strlen(sep) : 0;
+
+    if (key_set && sep_len == 0) {
+        fputs("collate: -k/--key requires a field separator "
+              "(-t/--field-separator or COLLATE_FIELD_SEP)\n", stderr);
+        return 2;
+    }
+    /* A separator with no explicit -k sorts by field 1. */
+    if (sep_len > 0 && !key_set) key_field = 1;
+
+    return cmd_sort(path, options, sep, sep_len, key_field);
 }
