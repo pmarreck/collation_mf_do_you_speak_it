@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# Benchmark suite for collation_mf_do_you_speak_it.
+#
+# Two parts:
+#   A) COMPARISON — wall-clock (hyperfine, median of N) of `collate` (house
+#      style) and `collate --code-point` vs coreutils `sort` (LC_ALL=C and a
+#      UTF-8 locale), and — when the deps compile — vs an ICU sort-key harness
+#      and a glibc `strcoll` harness. The alternatives are INDEPENDENT oracles;
+#      the numbers are the honest verdict on the "fast" claim.
+#   B) SCALING GATE — machine-independent metamorphic check: run the sort path
+#      at N, 2N, 4N, 8N and assert per-doubling time ratio stays sub-quadratic
+#      (O(n log n) ⇒ ratio ≈ 2; fail on ≥ 3). No per-machine baseline needed.
+#
+# Results are appended to bench/<machine-id>.ndjson (self-describing _meta
+# header first line). A machine with no prior entry seeds its baseline & passes.
+#
+# Never use `set -e` (masks intended non-zero exits). `set -u` alone.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR" || exit 1
+
+# Re-exec inside the dev shell if the benchmark tooling isn't on PATH.
+if ! command -v hyperfine >/dev/null 2>&1 || ! command -v luajit >/dev/null 2>&1; then
+	if command -v nix >/dev/null 2>&1; then
+		exec nix develop -c "$0" "$@"
+	fi
+	echo "FATAL: hyperfine/luajit not found and nix unavailable" >&2
+	exit 1
+fi
+
+BM_N="${BM_N:-50000}"          # comparison corpus size
+BM_SCALE_BASE="${BM_SCALE_BASE:-25000}"  # scaling gate base N (uses N,2N,4N,8N)
+BM_SEED="${BM_SEED:-1234567}"
+WARMUP="${BM_WARMUP:-3}"
+
+WORK="${TMPDIR:-/tmp}/collate_bm.$$"
+mkdir -p "$WORK"
+trap 'command rm -rf "$WORK" 2>/dev/null' EXIT
+
+# ── Machine id: stable hash of hostname + arch + CPU model ────────────────
+cpu_model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //')
+[ -n "$cpu_model" ] || cpu_model=$(uname -m)
+machine_id=$(printf '%s|%s|%s' "$(hostname 2>/dev/null)" "$(uname -m)" "$cpu_model" \
+	| sha256sum | head -c 12)
+NDJSON="$SCRIPT_DIR/bench/${machine_id}.ndjson"
+now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  collation_mf benchmark — machine ${machine_id}                     "
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo "CPU: $cpu_model"
+echo "corpus N=$BM_N  seed=$BM_SEED  warmup=$WARMUP"
+
+# ── Build collate (ReleaseFast, static) ──────────────────────────────────
+echo ""
+echo "Building collate (ReleaseFast)..."
+if ! nix build 2>&1 | tail -2; then
+	echo "FATAL: nix build failed" >&2
+	exit 1
+fi
+COLLATE="$SCRIPT_DIR/result/bin/collate"
+[ -x "$COLLATE" ] || COLLATE="$SCRIPT_DIR/zig-out/bin/collate"
+if [ ! -x "$COLLATE" ]; then echo "FATAL: collate not built" >&2; exit 1; fi
+
+# ── Detect an available UTF-8 locale ─────────────────────────────────────
+UTF8_LOCALE=$(locale -a 2>/dev/null | grep -iE '^en_US\.(utf-?8)$' | head -1)
+
+# ── Compile the optional comparison harnesses ────────────────────────────
+STRCOLL_BIN=""
+if cc -O2 -std=c11 -Wall -Wextra -o "$WORK/strcoll_sort" bench/strcoll_sort.c 2>"$WORK/strcoll.log"; then
+	STRCOLL_BIN="$WORK/strcoll_sort"
+else
+	echo "note: glibc strcoll harness did not compile (skipping):" >&2
+	sed 's/^/    /' "$WORK/strcoll.log" | head -3 >&2
+fi
+
+ICU_BIN=""
+if icu_flags=$(pkg-config --cflags --libs icu-uc icu-i18n 2>/dev/null) && \
+   cc -O2 -std=c11 -Wall -Wextra -o "$WORK/icu_sort" bench/icu_sort.c $icu_flags 2>"$WORK/icu.log"; then
+	ICU_BIN="$WORK/icu_sort"
+else
+	echo "note: ICU harness did not compile (skipping):" >&2
+	sed 's/^/    /' "$WORK/icu.log" 2>/dev/null | head -3 >&2
+fi
+
+# ── Generate the comparison corpus ───────────────────────────────────────
+CORPUS="$WORK/corpus_${BM_N}.txt"
+luajit bench/gen_corpus.lua "$BM_N" "$BM_SEED" > "$CORPUS"
+echo "corpus: $(wc -l < "$CORPUS" | tr -d ' ') lines, $(wc -c < "$CORPUS" | tr -d ' ') bytes"
+
+# ── Build the contestant list (name + wrapper) ───────────────────────────
+wrap() { # name, command...
+	local name="$1"; shift
+	local w="$WORK/wrap_$name"
+	{
+		echo '#!/usr/bin/env bash'
+		printf 'exec'
+		for a in "$@"; do printf ' %q' "$a"; done
+		printf ' %q >/dev/null 2>&1\n' "$CORPUS"
+	} > "$w"
+	chmod +x "$w"
+	echo "$w"
+}
+
+names=()
+wrappers=()
+add() { names+=("$1"); wrappers+=("$2"); }
+
+add "collate-house"      "$(wrap collate_house "$COLLATE")"
+add "collate-codepoint"  "$(wrap collate_cp "$COLLATE" --code-point)"
+add "sort-C"             "$(wrap sort_c env LC_ALL=C sort)"
+if [ -n "$UTF8_LOCALE" ]; then
+	add "sort-$UTF8_LOCALE" "$(wrap sort_utf8 env LC_ALL="$UTF8_LOCALE" sort)"
+fi
+if [ -n "$ICU_BIN" ]; then
+	add "icu-en_US"        "$(wrap icu "$ICU_BIN")"
+fi
+if [ -n "$STRCOLL_BIN" ] && [ -n "$UTF8_LOCALE" ]; then
+	add "glibc-strcoll-$UTF8_LOCALE" "$(wrap strcoll env LC_ALL="$UTF8_LOCALE" "$STRCOLL_BIN")"
+fi
+
+# ── Run hyperfine (fails loudly if any contestant errors) ────────────────
+echo ""
+echo "━━━ Part A: comparison (hyperfine -N --warmup $WARMUP, median wall-clock) ━━━"
+CSV="$WORK/results.csv"
+hyperfine -N --warmup "$WARMUP" --export-csv "$CSV" "${wrappers[@]}" 2>&1 \
+	| grep -vE '^\s*$' | tail -n +1
+
+# ── Parse CSV, print table, append ndjson ────────────────────────────────
+# hyperfine CSV columns: command,mean,stddev,median,user,system,min,max
+# Rows are in the same order as the commands we passed.
+mapfile -t rows < <(tail -n +2 "$CSV")
+
+# baseline = collate-house median for relative speed
+house_median=""
+declare -a medians mins means stddevs
+for i in "${!names[@]}"; do
+	IFS=',' read -r _cmd mean stddev median user sys min max <<<"${rows[$i]}"
+	medians[$i]="$median"; mins[$i]="$min"; means[$i]="$mean"; stddevs[$i]="$stddev"
+	[ "${names[$i]}" = "collate-house" ] && house_median="$median"
+done
+
+echo ""
+printf '%-34s %12s %12s %10s\n' "contestant" "median(ms)" "min(ms)" "vs house"
+printf '%-34s %12s %12s %10s\n' "----------" "----------" "-------" "--------"
+# Ensure ndjson has a self-describing header.
+if [ ! -f "$NDJSON" ]; then
+	mkdir -p "$SCRIPT_DIR/bench"
+	printf '{"_meta":"collation_mf benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"%s","cpu":%s,"schema":1,"generated_by":"./bm"}\n' \
+		"$machine_id" "$(printf '%s' "$cpu_model" | luajit -e 'io.write(string.format("%q", io.read("*a")))' 2>/dev/null || echo "\"$cpu_model\"")" \
+		>> "$NDJSON"
+	seeded=1
+fi
+for i in "${!names[@]}"; do
+	med_ms=$(awk -v v="${medians[$i]}" 'BEGIN{printf "%.2f", v*1000}')
+	min_ms=$(awk -v v="${mins[$i]}"    'BEGIN{printf "%.2f", v*1000}')
+	rel=$(awk -v a="${medians[$i]}" -v b="$house_median" 'BEGIN{ if(b>0) printf "%.2fx", a/b; else print "-"}')
+	printf '%-34s %12s %12s %10s\n' "${names[$i]}" "$med_ms" "$min_ms" "$rel"
+	printf '{"ts":"%s","n":%d,"contestant":"%s","median_s":%s,"min_s":%s,"mean_s":%s,"stddev_s":%s}\n' \
+		"$now_iso" "$BM_N" "${names[$i]}" "${medians[$i]}" "${mins[$i]}" "${means[$i]}" "${stddevs[$i]}" \
+		>> "$NDJSON"
+done
+
+# ── Part B: scaling gate (machine-independent, O(n log n)) ────────────────
+echo ""
+echo "━━━ Part B: scaling gate — collate house style at N,2N,4N,8N ━━━"
+echo "complexity claim: O(n log n)  ⇒  per-doubling ratio ≈ 2 (fail on ≥ 3)"
+base=$BM_SCALE_BASE
+declare -a sizes=("$base" "$((base*2))" "$((base*4))" "$((base*8))")
+declare -a scale_median
+for idx in "${!sizes[@]}"; do
+	n="${sizes[$idx]}"
+	c="$WORK/scale_${n}.txt"
+	luajit bench/gen_corpus.lua "$n" "$BM_SEED" > "$c"
+	w="$WORK/scale_wrap_${n}"
+	printf '#!/usr/bin/env bash\nexec %q %q >/dev/null 2>&1\n' "$COLLATE" "$c" > "$w"
+	chmod +x "$w"
+	scsv="$WORK/scale_${n}.csv"
+	hyperfine -N --warmup 2 --min-runs 5 --export-csv "$scsv" "$w" >/dev/null 2>&1
+	m=$(awk -F, 'NR==2{print $4}' "$scsv")
+	scale_median[$idx]="$m"
+	printf '  N=%-8d median=%8.2f ms\n' "$n" "$(awk -v v="$m" 'BEGIN{print v*1000}')"
+done
+
+gate_fail=0
+echo ""
+echo "  per-doubling ratios:"
+for idx in 1 2 3; do
+	prev="${scale_median[$((idx-1))]}"
+	cur="${scale_median[$idx]}"
+	ratio=$(awk -v a="$cur" -v b="$prev" 'BEGIN{ if(b>0) printf "%.3f", a/b; else print "0"}')
+	verdict="ok"
+	over=$(awk -v r="$ratio" 'BEGIN{print (r>=3.0)?1:0}')
+	if [ "$over" = "1" ]; then verdict="FAIL (super-linear/quadratic)"; gate_fail=1; fi
+	printf '    %d→%d : %sx   %s\n' "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$ratio" "$verdict"
+	printf '{"ts":"%s","kind":"scaling","from_n":%d,"to_n":%d,"ratio":%s}\n' \
+		"$now_iso" "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$ratio" >> "$NDJSON"
+done
+
+echo ""
+if [ "${seeded:-0}" = "1" ]; then
+	echo "  (new machine $machine_id — seeded baseline ndjson, passing)"
+fi
+echo "  ndjson log: $NDJSON"
+echo ""
+if [ "$gate_fail" = "1" ]; then
+	echo "SCALING GATE: FAIL — sort path grew super-linearly; investigate before shipping." >&2
+	exit 1
+fi
+echo "SCALING GATE: PASS (sub-quadratic across all doublings)"
+exit 0

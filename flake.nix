@@ -63,8 +63,21 @@
 
         devShells.default = pkgs.mkShell {
           # coreutils `sort` (LC_ALL=C) is the differential oracle for the
-          # code-point fallback integration test; hyperfine for benchmarks.
-          packages = [ zigPkg pkgs.hyperfine pkgs.coreutils ];
+          # code-point fallback integration test; hyperfine for benchmarks;
+          # luajit generates the benchmark corpus. pkg-config/gcc/icu are used
+          # ONLY by ./bm to compile the ICU and glibc-strcoll comparison
+          # harnesses — NOT dependencies of the library, CLI, or CI `checks`.
+          nativeBuildInputs = [
+            zigPkg
+            pkgs.hyperfine
+            pkgs.coreutils
+            pkgs.luajit
+            pkgs.pkg-config
+            pkgs.gcc
+            pkgs.jq
+          ];
+          # In buildInputs so pkg-config finds icu-uc/icu-i18n on PKG_CONFIG_PATH.
+          buildInputs = [ pkgs.icu ];
         };
       });
 }
