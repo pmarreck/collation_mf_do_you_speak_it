@@ -1,0 +1,16 @@
+.{
+    .name = .collation_mf_do_you_speak_it,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "include",
+        "cli",
+    },
+    // Zig-suggested fingerprint for package name `.collation_mf_do_you_speak_it`.
+    // Lower 32 bits = hash of the name; upper 32 bits = random per-package.
+    .fingerprint = 0xaf0e76de46da2763,
+}
