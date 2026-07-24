@@ -1,5 +1,7 @@
 # collation_mf_do_you_speak_it
 
+[![Garnix](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fgarnix.io%2Fapi%2Fbadges%2Fpmarreck%2Fcollation_mf_do_you_speak_it%3Fbranch%3Dyolo)](https://garnix.io/repo/pmarreck/collation_mf_do_you_speak_it)
+
 A small, **fast**, **opinionated**, cross-platform, **reproducible** string
 collation / sorting library that ships its own versioned ordering and **ignores
 the OS locale entirely**.
