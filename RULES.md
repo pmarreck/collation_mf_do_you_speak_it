@@ -54,3 +54,19 @@ changing one changes the *product*, not just an implementation detail.
    green state (`./test` passes) before it is made.
 9. **Clean test output.** Expected stderr is captured and asserted, never leaked
    to the console during a passing run.
+
+## Internationalization
+
+- **Status: `enabled` (PREPARE phase).** Decision owner: Peter Marreck, via the
+  coordinator, 2026-07-24 EST. Scope: the `collate` CLI's user-facing
+  `--help`/`--about` strings.
+- Rationale: the CLI is intended to be cross-platform, professional, UTF-8-native
+  tooling; groundwork now (typed message table, `--lang` + env precedence,
+  localized-alias hook, English default/fallback) avoids a retrofit later.
+- PREPARE phase means: infrastructure exists and English is complete; other
+  locales are non-fatal (missing app-requested locale WARNs and falls back to
+  English). Only `en` + a `de` demonstration locale exist today. Full 50-locale
+  coverage and compile/test enforcement are DEFERRED to the enforce phase (when
+  the CLI surface stabilizes). See the i18n skill for the enforce checklist.
+- Precedence (highest first): `--lang <code>` / localized alias → `COLLATION_MF_LANG`
+  → `LC_ALL` → `LC_MESSAGES` → `LANG` → English.

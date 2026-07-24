@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,8 +48,24 @@ static void announce_debug_build(void) {
 #endif
 }
 
-static int print_help(void) {
-    fputs(
+/* ── i18n (PREPARE phase) ──────────────────────────────────────────────────
+ * English is canonical and the fallback; German (de) is a demonstration locale
+ * that exercises the localized-alias + env-precedence machinery. Strings live
+ * in this typed table (never inline at the use site). Full 50-locale coverage
+ * and compile-time enforcement are DEFERRED to the enforce phase — see
+ * RULES.md and the i18n skill. */
+typedef enum { LANG_EN = 0, LANG_DE, LANG_COUNT } lang_t;
+
+typedef struct {
+    const char *code;       /* ISO code, e.g. "en" */
+    const char *about_desc; /* trailing one-line description in --about */
+    const char *help_text;  /* full --help body */
+} messages_t;
+
+static const messages_t MESSAGES[LANG_COUNT] = {
+    [LANG_EN] = {
+        "en",
+        "locale-free opinionated collation",
         "collate — fast, opinionated, reproducible, locale-free line sort\n"
         "\n"
         "Usage:\n"
@@ -70,16 +87,100 @@ static int print_help(void) {
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
         "      --version                Print the library version\n"
+        "      --lang <code>            UI language (e.g. en, de); overrides env\n"
         "\n"
         "Environment:\n"
+        "  COLLATION_MF_LANG            UI language (overrides LANG/LC_*)\n"
         "  COLLATE_FIELD_SEP            Default field separator (overridden by -t)\n",
-        stdout);
+    },
+    [LANG_DE] = {
+        "de",
+        "gebietsschema-freie, eigensinnige Sortierung",
+        "collate — schnelle, eigensinnige, reproduzierbare Zeilensortierung ohne Gebietsschema\n"
+        "\n"
+        "Verwendung:\n"
+        "  collate [OPTIONEN] [DATEI]\n"
+        "\n"
+        "Liest Zeilen aus DATEI (oder stdin) und schreibt sie sortiert nach stdout.\n"
+        "DATEI darf '-' oder '@stdin' sein, um die Standardeingabe zu lesen (Standard).\n"
+        "\n"
+        "Reihenfolge (Standard = der eigensinnige Hausstil):\n"
+        "  Leerraum < Satzzeichen < Ziffern < Buchstaben (struktur-zuerst)\n"
+        "  natürliche Zahlenläufe (file2 < file10)\n"
+        "  Groß-/Kleinschreibung-unabhängige Grundbuchstaben (apple ~ Apple), klein zuerst\n"
+        "  Diakritika als sekundäres Kriterium (café nahe cafe, nicht nach z)\n"
+        "\n"
+        "Optionen:\n"
+        "  -t, --field-separator <SEP>  Zeile an SEP trennen (Standard: ganze Zeile)\n"
+        "  -k, --key <N>                Nach dem N-ten Feld sortieren; gleich -> ganze Zeile\n"
+        "  -c, --code-point             Reine UTF-8-Byte-Reihenfolge (== LC_ALL=C sort)\n"
+        "  -h, --help / --hilfe         Diese Hilfe anzeigen\n"
+        "      --about                  Version + Plattform in einer Zeile\n"
+        "      --version                Bibliotheksversion anzeigen\n"
+        "      --lang / --sprache <code>  Anzeigesprache (z. B. en, de); überschreibt Umgebung\n"
+        "\n"
+        "Umgebung:\n"
+        "  COLLATION_MF_LANG            Anzeigesprache (überschreibt LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Standard-Feldtrenner (durch -t überschrieben)\n",
+    },
+};
+
+/* Map a locale code (bare "de" or "de_DE.UTF-8" etc.) to a supported lang by
+ * its leading language subtag (longest-match is unnecessary at 2 locales).
+ * Returns 1 and sets *out on match; 0 if unsupported. */
+static int lang_from_code(const char *code, lang_t *out) {
+    if (!code || !code[0]) return 0;
+    char buf[8];
+    size_t n = 0;
+    while (code[n] && n < sizeof(buf) - 1 &&
+           code[n] != '_' && code[n] != '-' && code[n] != '.' && code[n] != '@') {
+        buf[n] = (char)tolower((unsigned char)code[n]);
+        n++;
+    }
+    buf[n] = '\0';
+    for (int i = 0; i < LANG_COUNT; i++) {
+        if (strcmp(buf, MESSAGES[i].code) == 0) { *out = (lang_t)i; return 1; }
+    }
     return 0;
 }
 
-static int print_about(void) {
-    printf("collate %s (%s-%s) — locale-free opinionated collation\n",
-           collation_mf_version(), CMF_OS, CMF_ARCH);
+/* Resolve UI language. Precedence (highest first): explicit request (--lang or
+ * a localized alias) > COLLATION_MF_LANG > LC_ALL > LC_MESSAGES > LANG >
+ * English. An unsupported EXPLICIT app request WARNs (non-fatal in prepare
+ * phase; enforce phase would make it fatal) and falls back to English; ambient
+ * env locales fall back SILENTLY so a foreign host locale never spams stderr. */
+static lang_t resolve_lang(const char *explicit_code) {
+    lang_t lang;
+    if (explicit_code && explicit_code[0]) {
+        if (lang_from_code(explicit_code, &lang)) return lang;
+        fprintf(stderr, "collate: WARN i18n missing-locale '%s' (falling back to English)\n",
+                explicit_code);
+        return LANG_EN;
+    }
+    const char *app = getenv("COLLATION_MF_LANG");
+    if (app && app[0]) {
+        if (lang_from_code(app, &lang)) return lang;
+        fprintf(stderr, "collate: WARN i18n missing-locale '%s' (falling back to English)\n", app);
+        return LANG_EN;
+    }
+    const char *ambient[3];
+    ambient[0] = getenv("LC_ALL");
+    ambient[1] = getenv("LC_MESSAGES");
+    ambient[2] = getenv("LANG");
+    for (int i = 0; i < 3; i++) {
+        if (ambient[i] && ambient[i][0] && lang_from_code(ambient[i], &lang)) return lang;
+    }
+    return LANG_EN;
+}
+
+static int print_help(lang_t lang) {
+    fputs(MESSAGES[lang].help_text, stdout);
+    return 0;
+}
+
+static int print_about(lang_t lang) {
+    printf("collate %s (%s-%s) — %s\n",
+           collation_mf_version(), CMF_OS, CMF_ARCH, MESSAGES[lang].about_desc);
     return 0;
 }
 
@@ -300,6 +401,9 @@ int main(int argc, char *argv[]) {
     int key_set = 0;        /* explicit -k/--key seen */
     int sep_from_flag = 0;  /* -t/--field-separator seen (overrides env) */
     int only_switches = 0;  /* set once we see "--" */
+    const char *lang_code = NULL;     /* explicit --lang/--sprache code */
+    const char *inferred_lang = NULL; /* from a localized alias (e.g. --hilfe) */
+    int want_help = 0, want_about = 0, want_version = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -310,12 +414,27 @@ int main(int argc, char *argv[]) {
         if (!only_switches && a[0] == '-' && a[1] != '\0' &&
             !(strcmp(a, "-") == 0)) {
             if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
-                return print_help();
+                want_help = 1;
+            } else if (strcmp(a, "--hilfe") == 0) {
+                /* German help alias: infers German UI (an explicit --lang still
+                 * wins). Aliases like this must stay disjoint from every English
+                 * canonical option name (see the i18n skill's collision rule). */
+                want_help = 1;
+                if (!inferred_lang) inferred_lang = "de";
             } else if (strcmp(a, "--about") == 0) {
-                return print_about();
+                want_about = 1;
             } else if (strcmp(a, "--version") == 0) {
-                printf("%s\n", collation_mf_version());
-                return 0;
+                want_version = 1;
+            } else if (strcmp(a, "--lang") == 0 || strcmp(a, "--sprache") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "collate: %s requires a language code\n", a);
+                    return 2;
+                }
+                lang_code = argv[++i];
+            } else if (strncmp(a, "--lang=", 7) == 0) {
+                lang_code = a + 7;
+            } else if (strncmp(a, "--sprache=", 10) == 0) {
+                lang_code = a + 10;
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
                 options |= COLLATION_MF_CODE_POINT;
             } else if (strcmp(a, "--field-separator") == 0) {
@@ -380,6 +499,17 @@ int main(int argc, char *argv[]) {
             path = a;
         }
     }
+
+    /* Resolve the UI language once (all args parsed => later args win), then
+     * handle terminal actions. Help/version/about must not be blocked by sort
+     * argument validation, so they dispatch before it. */
+    lang_t lang = resolve_lang(lang_code ? lang_code : inferred_lang);
+    if (want_help) return print_help(lang);
+    if (want_version) {
+        printf("%s\n", collation_mf_version());
+        return 0;
+    }
+    if (want_about) return print_about(lang);
 
     /* Field separator precedence: -t/--field-separator wins; else the
      * COLLATE_FIELD_SEP env default; else whole-line (IFS-style). */
