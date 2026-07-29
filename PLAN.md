@@ -28,12 +28,31 @@ maintained_by: agent
       checks.build/test, all verified to build); README badge swapped from the
       retired Garnix to the dynamic Mechatron badge. (2026-07-24)
 
+- [x] Housekeeping: trashed 4 stale `result-N` nix GC roots (leftovers from a
+      one-off multi-installable `nix build` during CI target verification on
+      07-24 — no committed script creates them; `./build` and `./bm` each build
+      a single installable and only ever write `result`). Added `dirtree note`
+      annotations for every notable path (there were zero). Reindexed codescan.
+      (2026-07-29 13:15 EDT)
+
 Current test count: 63 passed, 0 failed (15 Zig unit + 48 CLI integration).
 
 ## Open follow-ups
 
 - [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
       — needs the host secret; see report if it required interactive sudo.
+- [ ] Document the CJK scope boundary in README "Limits": CJK currently falls
+      into CLASS_OTHER (code-point order) — reproducible and non-corrupting, but
+      NOT linguistically ordered. State the escape hatch explicitly: supply a
+      reading/romanization column and sort it with `-t`/`-k` (this is what
+      Japanese systems actually do — the yomi field), which needs no dictionary
+      in our binary.
+- [ ] Fullwidth/halfwidth folding (U+FF00–U+FFEF, ~225 entries, NO dictionary):
+      fold fullwidth ASCII to ASCII and halfwidth katakana to fullwidth. Today a
+      fullwidth `５` is CLASS_OTHER, so fullwidth numerals get NO natural-numeric
+      treatment and fullwidth Latin sorts after every letter. Cheap real win.
+- [ ] `docs/` is an empty placeholder — populate (a `docs/CJK.md` scope note is
+      the obvious first tenant) or remove it.
 - [ ] `strcoll8` allocates two temp keys per call; add an allocation-free
       streaming level-by-level comparator for the common early-exit case.
 - [ ] Numeric significant-digit length capped at 250 (byte-sized prefix);
@@ -49,7 +68,17 @@ Current test count: 63 passed, 0 failed (15 Zig unit + 48 CLI integration).
 - [ ] Broaden diacritic coverage beyond Latin-1 + common Latin Extended-A.
 - [ ] Wire the reserved option bits (`COLLATION_MF_NUMERIC`,
       `COLLATION_MF_CASE_SENSITIVE`) to actually toggle behavior.
-- [ ] Optional locale tailoring: a real `collation_mf_open_locale`.
+- [ ] Optional locale tailoring: a real `collation_mf_open_locale`. (This is the
+      architectural hook CJK would need — ICU calls it "tailoring"; it is a
+      per-locale reordering layer, not more rows in `foldLetter`.)
+- [ ] Optional table-only CJK tier behind a build flag (keeps the default binary
+      small): hangul is algorithmic (jamo decomposition — zero data, and its
+      code-point order is ALREADY correct dictionary order); kana is a ~200-entry
+      gojūon table plus the JIS X 4061 tie-break levels (voicing/small-kana/
+      hiragana-vs-katakana); Han by Unihan `kTotalStrokes`/`kRSUnicode`. Stops
+      short of pinyin/yomi — those need real dictionaries (polyphone and reading
+      disambiguation is word-level, not character-level) and would blow the
+      "small, no-ICU" thesis.
 - [ ] SIMD sort-key generation for throughput.
 - [ ] `./fuzz`: property-fuzz `sortKeyAlloc` — the sort-key-order ==
       compare-order invariant must never break on random bytes.

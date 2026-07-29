@@ -1,0 +1,39 @@
+# Dirtree: Stateful directory trees in the CLI for humans and LLMs. https://github.com/pmarreck/dirtree
+ver=1.2
+annotate=[
+	.mechatron-prime = Mechatron Prime CI config (Garnix is retired)
+	.mechatron-prime/targets = Exact flake attrs the Thelio worker builds per signed push: packages.default + checks.build/test
+	LICENSE = MIT
+	PLAN.md = Work plan: done items with dates, open follow-ups, deferred future work
+	PROJECT_OVERVIEW.md = Ultimate goals, rationale (glibc/musl/ICU), architecture diagram, terminology (sort key, house style, collation element, levels)
+	README.md = User-facing: why, house-style rules, build/test, CLI + field/lang usage, C FFI, benchmark table, v1 limits
+	RULES.md = Load-bearing invariants (structural-first, no OS locale, key-order==compare-order, C-safe keys, pure core, CLI dogfoods FFI, TDD)
+	bench = Benchmark harnesses, oracle competitors, and the source-controlled results log
+	bench/82bbb9f01c00.ndjson = Benchmark log for the Threadripper 3990X machine — one record per contestant per run, _meta header line
+	bench/gen_corpus.lua = Deterministic corpus generator (hand-rolled xorshift32 so output is byte-identical everywhere); usage: luajit gen_corpus.lua N [seed]
+	bench/icu_sort.c = Benchmark competitor: ICU4C ucol_getSortKey precompute-then-memcmp sort (the 'correct but heavy' baseline)
+	bench/strcoll_sort.c = Benchmark competitor: glibc strcoll() locale sort (the non-reproducible baseline this project replaces)
+	bm = ./bm — hyperfine comparison vs sort/ICU/strcoll oracles + machine-independent O(n log n) scaling gate; appends bench/<machine-id>.ndjson
+	build = ./build — ReleaseFast via 'nix build', installs to zig-out/bin/collate; --debug uses bare zig build
+	build.zig = Zig build: forces static-musl on native Linux, ReleaseFast default, static lib + C CLI + test step
+	build.zig.zon = Package manifest (name, 0.1.0, min Zig 0.16.0, no deps, packaged paths)
+	cli = C CLI that dogfoods the FFI (written in C so it CANNOT import the Zig core)
+	cli/main.c = The 'collate' command: arg parsing, -t/-k field extraction, i18n message tables (en/de), file+stdin I/O, qsort by FFI sort keys with raw-line tie-break
+	docs = (empty placeholder — populate or remove)
+	flake.lock = Pinned flake input revisions (reproducibility)
+	flake.nix = Nix flake: Zig pinned via mitchellh/zig-overlay; packages.default + checks.build/test + dev shell (hyperfine, ICU, luajit)
+	include = Public C API header (the real public interface)
+	include/collation_mf_do_you_speak_it.h = Public C FFI header, modeled on ICU4C ucol_* but UTF-8 bytes+len; option bits (CODE_POINT/NUMERIC/CASE_SENSITIVE)
+	result = Nix build output symlink (gitignored GC root); ./build refreshes it
+	src = Pure Zig core + C FFI adapter (hexagonal: no I/O below the CLI)
+	src/collation.zig = PURE core, no I/O: multi-level sort-key builder (L1 structural class+base letter, L2 diacritic, L3 case), foldLetter table, natural-numeric length-prefixed digit runs, compareAlloc; all unit tests
+	src/lib.zig = C FFI adapter: collation_mf_* export fns (open/close/strcoll8/get_sort_key/strcoll/strxfrm/version) over the Zig core
+	test = ./test — master runner: nix-built binary + Zig unit tests + all tests/integration/*.sh; exit code = failure count
+	tests = Test suites (integration; Zig unit tests live inline in src/)
+	tests/integration = Bash CLI integration suites, all driven by ./test
+	tests/integration/cli_surface.sh = CLI surface: help/about/version, stdin forms (-/@stdin), file input incl. spaces in path, error paths, empty input
+	tests/integration/code_point_differential.sh = MFIC differential oracle: --code-point must exactly reproduce 'LC_ALL=C sort' over a generated corpus
+	tests/integration/field_sort.sh = Field/separator sorting: -t/--field-separator, -k/--key, COLLATE_FIELD_SEP precedence, missing fields
+	tests/integration/house_style.sh = End-to-end house-style ordering assertions (structural-first, natural numeric, case/diacritic tie-breaks)
+	tests/integration/i18n.sh = i18n prepare-phase: --lang/COLLATION_MF_LANG/LC_* precedence, English fallback, --hilfe/--sprache aliases
+]
