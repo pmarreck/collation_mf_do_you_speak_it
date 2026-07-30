@@ -84,6 +84,10 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  -t, --field-separator <SEP>  Split each line on SEP (default: whole line)\n"
         "  -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line\n"
         "  -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)\n"
+        "  -d, --decimal                Read a leading number's first '.' as a\n"
+        "                               decimal point (1.10 < 1.9). Default treats\n"
+        "                               every '.' as a separator (1.9 < 1.10).\n"
+        "      --version-sort           Explicit form of the default dot handling\n"
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
         "      --version                Print the library version\n"
@@ -114,6 +118,10 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  -t, --field-separator <SEP>  Zeile an SEP trennen (Standard: ganze Zeile)\n"
         "  -k, --key <N>                Nach dem N-ten Feld sortieren; gleich -> ganze Zeile\n"
         "  -c, --code-point             Reine UTF-8-Byte-Reihenfolge (== LC_ALL=C sort)\n"
+        "  -d, --decimal                Erstes '.' einer führenden Zahl als Dezimal-\n"
+        "                               trennzeichen lesen (1.10 < 1.9). Standard:\n"
+        "                               jedes '.' ist ein Trenner (1.9 < 1.10).\n"
+        "      --version-sort           Ausdrückliche Form des Standardverhaltens\n"
         "  -h, --help / --hilfe         Diese Hilfe anzeigen\n"
         "      --about                  Version + Plattform in einer Zeile\n"
         "      --version                Bibliotheksversion anzeigen\n"
@@ -437,6 +445,13 @@ int main(int argc, char *argv[]) {
                 lang_code = a + 10;
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
                 options |= COLLATION_MF_CODE_POINT;
+            } else if (strcmp(a, "-d") == 0 || strcmp(a, "--decimal") == 0
+                       || strcmp(a, "--decimals") == 0) {
+                options |= COLLATION_MF_DECIMAL;
+            } else if (strcmp(a, "--version-sort") == 0) {
+                /* The explicit form of the default. Present so a later argument
+                 * can override an earlier --decimal, per the CLI convention. */
+                options &= ~(uint32_t)COLLATION_MF_DECIMAL;
             } else if (strcmp(a, "--field-separator") == 0) {
                 if (i + 1 >= argc) {
                     fputs("collate: --field-separator requires an argument\n", stderr);

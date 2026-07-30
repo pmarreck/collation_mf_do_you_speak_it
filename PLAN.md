@@ -50,7 +50,23 @@ maintained_by: agent
       assertions mutation-verified: knocking out the ș row and desyncing the
       expansion level-count each produce a failure. (2026-07-29 23:24 EDT)
 
-Current test count: 89 passed, 0 failed (21 Zig unit + 68 CLI integration).
+- [x] **Signed numbers + optional decimal mode.** A `-` is a minus sign only when
+      it starts the collated string (Peter's rule — otherwise `peter-3`/`peter-4`
+      and ISO dates sort absurdly); under `-t`/`-k` that means the start of the
+      FIELD, which needed no extra plumbing. Negatives get class 0x28 (between
+      punctuation and digits) with complemented length+digit weights so magnitude
+      inverts under plain memcmp, plus a NEG_END sentinel so "no fraction" sorts
+      last (-1.5 < -1). Dots stay SEPARATORS by default (version semantics,
+      1.9 < 1.10 — Peter reversed an earlier decision here, correctly: dotted data
+      in the wild is overwhelmingly version-shaped); real-number reading is opt-in
+      via `OPT_DECIMAL` / `-d`/`--decimal`, with `--version-sort` as the explicit
+      default so a later arg can override. 11 new unit tests + 20 CLI tests.
+      Documented end to end in `docs/NUMERIC.md`. (2026-07-29 23:56 EDT)
+- [x] `docs/` is no longer an empty placeholder — `docs/NUMERIC.md` covers the
+      technique, the BLIP derivation, advantages, and all 10 caveats.
+      (2026-07-29 23:56 EDT)
+
+Current test count: 123 passed, 0 failed (35 Zig unit + 88 CLI integration).
 
 ## Open follow-ups
 
@@ -70,25 +86,13 @@ Current test count: 89 passed, 0 failed (21 Zig unit + 68 CLI integration).
       the obvious first tenant) or remove it.
 - [ ] `strcoll8` allocates two temp keys per call; add an allocation-free
       streaming level-by-level comparator for the common early-exit case.
-- [ ] **Lift the 250-significant-digit numeric cap using BLIP's escalating
-      length-class idea** (Peter, 2026-07-29 — see `~/Code/BLIP`, his own
-      "Byte Length Integer Prefix" project). Today `pushNumericPrimary` puts the
-      significant-digit count in ONE byte (`WEIGHT_BASE + N`, N ≤ 250), so two
-      numbers agreeing on their first 250 digits compare EQUAL. BLIP-BE solves
-      the general problem — magnitude class in the header, big-endian payload
-      after, `memcmp`-ordered, and its continuation flag (bit 5) makes the length
-      field unbounded, which is exactly the field we capped.
-      **Caveat: BLIP cannot drop in verbatim.** Its payload is raw LE/BE bytes
-      that freely contain 0x00 and 0x01 (e.g. 256 = `[0xC2,0x01,0x00]`), which
-      are our TERM and SEP — that would violate RULES.md #4 (C-safe keys, no
-      interior NUL). We don't need BLIP's payload though: ours is already
-      digits-as-bytes. Adopt the *length-prefix structure only*, byte-range
-      restricted to >= 0x02: keep `0x02+N` for N <= 250 (backward compatible for
-      every realistic input), and reserve 0xFD/0xFE/0xFF as escalating
-      "longer length follows" classes with the length itself in base-253
-      big-endian. Ordering is preserved by construction, since any escalation
-      byte exceeds every single-byte length and more digits always means a
-      larger number.
+- [ ] Numeric follow-ups now that signs and decimals exist (all documented as
+      caveats in `docs/NUMERIC.md`, none currently a silent surprise):
+      explicit `+` as a sign (today `+5 < -3`, which is wrong when `+` and `-`
+      are mixed); exponent notation (`1e10 < 2e5`); and deciding whether
+      leading-zero collisions (`007` == `7`) should become a tertiary-level
+      distinction so the library's order is total without relying on the CLI's
+      raw-byte tie-break.
 
 ## Deferred (future, noted in README Limits)
 

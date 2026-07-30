@@ -63,14 +63,18 @@
 
         devShells.default = pkgs.mkShell {
           # coreutils `sort` (LC_ALL=C) is the differential oracle for the
-          # code-point fallback integration test; hyperfine for benchmarks;
-          # luajit generates the benchmark corpus. pkg-config/gcc/icu are used
-          # ONLY by ./bm to compile the ICU and glibc-strcoll comparison
-          # harnesses — NOT dependencies of the library, CLI, or CI `checks`.
+          # code-point fallback integration test; `bc` is the independent
+          # ARBITRARY-PRECISION oracle for the big-integer numeric tests
+          # (coreutils `sort -g` loses precision past ~19 significant digits, so
+          # it cannot serve); hyperfine for benchmarks; luajit generates the
+          # benchmark corpus. pkg-config/gcc/icu are used ONLY by ./bm to compile
+          # the ICU and glibc-strcoll comparison harnesses — NOT dependencies of
+          # the library, CLI, or CI `checks`.
           nativeBuildInputs = [
             zigPkg
             pkgs.hyperfine
             pkgs.coreutils
+            pkgs.bc
             pkgs.luajit
             pkgs.pkg-config
             pkgs.gcc

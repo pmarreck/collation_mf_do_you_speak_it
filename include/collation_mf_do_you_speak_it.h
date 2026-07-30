@@ -44,6 +44,15 @@ extern "C" {
  * will promote case to a primary distinction. v1: no-op. */
 #define COLLATION_MF_CASE_SENSITIVE (1u << 2)
 
+/* Read the first `.` of a LEADING number as a decimal point (1.10 < 1.9)
+ * instead of a separator. OFF by default: dotted numbers in the wild are
+ * overwhelmingly version- and filename-shaped, where 1.9 < 1.10 is wanted.
+ * The two readings are mutually exclusive — no single order satisfies both,
+ * which is why coreutils ships `-n`, `-V` and `-g` separately rather than
+ * unifying them. Applies at offset 0 of the collated string only, so
+ * "peter-3" and "v1.9" keep separator semantics either way. */
+#define COLLATION_MF_DECIMAL        (1u << 3)
+
 /* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
 
 #define COLLATION_MF_LESS     (-1)

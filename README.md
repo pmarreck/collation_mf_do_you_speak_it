@@ -27,7 +27,14 @@ In priority order:
    (this is the deliberate deviation from the Unicode Collation Algorithm).
    So: `thing < "thing " < thing2 < thingthing`, and `"test with spaces" < test1`.
    *Spaces before letters. COME ON.*
-2. **Natural numeric runs.** `file2 < file10` (digit runs compare as numbers).
+2. **Natural numeric runs, arbitrary precision.** `file2 < file10` — digit runs
+   compare as numbers, with **no cap on digit count**. Two 10,000-digit numbers
+   order correctly. A leading `-` before digits is a **minus sign**
+   (`-10 < -5 < 0`), but a `-` anywhere else stays a separator, so
+   `peter-3 < peter-4` and ISO dates are unharmed. Dots are separators by default
+   (`1.9 < 1.10`, version semantics); `-d`/`--decimal` reads a leading number's
+   first dot as a decimal point (`1.10 < 1.9`). Full detail and the complete list
+   of caveats: **[docs/NUMERIC.md](docs/NUMERIC.md)**.
 3. **Case-insensitive base letters.** `apple` and `Apple` are adjacent, not
    split into "all-uppercase-then-all-lowercase".
 4. **Diacritics as a secondary tie-break.** `café` sorts near `cafe`
@@ -59,6 +66,9 @@ collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
   -t, --field-separator <SEP>  Split each line on SEP (default: whole line)
   -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line
   -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)
+  -d, --decimal                Leading number's first '.' is a decimal point
+                               (1.10 < 1.9); default treats '.' as a separator
+      --version-sort           Explicit form of the default dot handling
   -h, --help                   Show help
       --about                  One-line version + platform
       --version                Library version
@@ -180,6 +190,11 @@ landed after `z` by virtue of being unrecognized.
   its own "other" element). Full normalization is deferred.
 - `strcoll8` allocates temporary keys per call; the performance model is
   "precompute a sort key once, compare many". SIMD/streaming compare is deferred.
+- **Numeric caveats are enumerated in [docs/NUMERIC.md](docs/NUMERIC.md)** — in
+  short: leading zeros are invisible (`007` == `7`), thousands separators and
+  exponent notation are not understood, an explicit `+` is not a sign, a sign is
+  only recognized at the start of the collated string (use `-t`/`-k` to make a
+  number a field), and digits must be ASCII.
 
 ## Naming
 

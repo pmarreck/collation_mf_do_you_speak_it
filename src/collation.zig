@@ -24,6 +24,13 @@ const std = @import("std");
 pub const OPT_CODE_POINT: u32 = 1 << 0;
 pub const OPT_NUMERIC: u32 = 1 << 1; // reserved (numeric is default-on in house style)
 pub const OPT_CASE_SENSITIVE: u32 = 1 << 2; // reserved
+/// Treat the first `.` of a LEADING number as a decimal point (1.10 < 1.9)
+/// instead of a separator. OFF by default, because dotted-number data in the
+/// wild is overwhelmingly version- and filename-shaped, where 1.9 < 1.10 is the
+/// wanted answer. The two readings are mutually exclusive — no single order
+/// satisfies both — which is exactly why coreutils ships `-n`, `-V`, and `-g`
+/// as separate flags rather than unifying them.
+pub const OPT_DECIMAL: u32 = 1 << 3;
 
 // ─── Sort-key structural bytes ───────────────────────────────────────────
 const TERM: u8 = 0x00; // whole-key terminator (< everything)
@@ -33,6 +40,11 @@ const SEP: u8 = 0x01; // level separator (< all content, > terminator)
 // "structural-first" house rule: whitespace < punctuation < digit < letter.
 const CLASS_WS: u8 = 0x10;
 const CLASS_PUNCT: u8 = 0x20;
+/// A NEGATIVE number, slotted between punctuation and digits so that every
+/// negative sorts below every non-negative while still ranking above bare
+/// punctuation. Only reachable for a leading signed number (see
+/// `parseLeadingNumber`).
+const CLASS_NEG: u8 = 0x28;
 const CLASS_DIGIT: u8 = 0x30;
 const CLASS_LETTER: u8 = 0x40;
 const CLASS_OTHER: u8 = 0x50;
@@ -254,6 +266,115 @@ const NUM_ESCALATE: u8 = 0xFF;
 /// +WEIGHT_BASE offset inside one byte, keeping every key byte >= 0x02.
 const NUM_RADIX: usize = 254;
 
+// ─── Inverted (negative) numeric weights ─────────────────────────────────
+// For a negative number the order must REVERSE: a bigger magnitude is a smaller
+// value. Every weight below is therefore a complement, chosen so the result
+// still lands in [0x02, 0xFF] and never collides with TERM or SEP.
+const NEG_LEN_TOP: u8 = 0xFE; // length byte = NEG_LEN_TOP - N  (0xFE..0x04)
+const NEG_ESCALATE: u8 = 0x02; // below every inverted short-form length byte
+const NEG_DIGIT_TOP: u8 = WEIGHT_BASE + 9; // digit weight = TOP - d (0x0B..0x02)
+/// Terminates a negative number's digits. "Shorter prefix sorts first" is baked
+/// into memcmp, so a negative with no fractional part would otherwise sort
+/// BEFORE one that has one — yet -1.5 < -1. A high sentinel after the digits
+/// inverts that: running out of digits becomes the LARGEST continuation. Emitted
+/// unconditionally so a negative's encoding does not change shape with
+/// OPT_DECIMAL; it is merely inert when decimals are off.
+const NEG_END: u8 = 0xFF;
+
+/// Emit a significant-digit count. `invert` complements every byte so that a
+/// larger count sorts EARLIER, which is what a negative number needs.
+fn pushNumLength(l1: *L1, alloc: std.mem.Allocator, n: usize, invert: bool) !void {
+    if (n <= NUM_SHORT_MAX) {
+        const short: u8 = @intCast(n);
+        try l1.append(alloc, if (invert) NEG_LEN_TOP - short else WEIGHT_BASE + short);
+        return;
+    }
+    var tmp: [8]u8 = undefined; // 254^8 digits exceeds any physical input
+    var v = n;
+    var k: usize = 0;
+    while (v > 0) : (k += 1) {
+        tmp[k] = @intCast(v % NUM_RADIX);
+        v /= NUM_RADIX;
+    }
+    const kb: u8 = @intCast(k);
+    try l1.append(alloc, if (invert) NEG_ESCALATE else NUM_ESCALATE);
+    try l1.append(alloc, if (invert) NEG_LEN_TOP - kb else WEIGHT_BASE + kb);
+    while (k > 0) {
+        k -= 1;
+        try l1.append(alloc, if (invert) 0xFF - tmp[k] else WEIGHT_BASE + tmp[k]);
+    }
+}
+
+/// A signed and/or fractional number found at the START of the collated string.
+const LeadingNum = struct {
+    neg: bool,
+    int: []const u8, // significant integer digits, leading zeros stripped
+    frac: []const u8, // fractional digits, trailing zeros stripped
+    end: usize, // index just past the consumed number
+};
+
+/// Recognize `-?digits(.digits)?` but ONLY at offset 0, which is the whole point:
+/// a '-' or '.' anywhere else is a separator, so "peter-3" keeps sorting before
+/// "peter-4" and "v1.9" keeps version semantics (1.9 < 1.10). Under `-t`/`-k` the
+/// collated string IS the field, so "offset 0" means the start of the sort field.
+///
+/// Returns null for a plain unsigned integer with no decimal point, which routes
+/// it back through the ordinary scanner and makes byte-identical backward
+/// compatibility true BY CONSTRUCTION rather than by careful duplication.
+fn parseLeadingNumber(s: []const u8, decimal: bool) ?LeadingNum {
+    var i: usize = 0;
+    const neg = s.len > 1 and s[0] == '-' and s[1] >= '0' and s[1] <= '9';
+    if (neg) i = 1;
+
+    const int_start = i;
+    while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+    if (i == int_start) return null; // no digit run here at all
+
+    var int_digits = s[int_start..i];
+    var z: usize = 0;
+    while (z < int_digits.len and int_digits[z] == '0') z += 1;
+    int_digits = int_digits[z..];
+
+    var frac: []const u8 = &.{};
+    var had_dot = false;
+    if (decimal and i + 1 < s.len and s[i] == '.' and s[i + 1] >= '0' and s[i + 1] <= '9') {
+        had_dot = true;
+        const fs = i + 1;
+        i += 1;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        frac = s[fs..i];
+        // Trailing zeros are not significant in a fraction: 1.50 == 1.5, 1.00 == 1.
+        var e = frac.len;
+        while (e > 0 and frac[e - 1] == '0') e -= 1;
+        frac = frac[0..e];
+    }
+
+    if (!neg and !had_dot) return null; // exactly the pre-existing behavior
+    return .{ .neg = neg, .int = int_digits, .frac = frac, .end = i };
+}
+
+/// Emit one signed/fractional number as a single primary element. Contributes
+/// exactly one L2 and one L3 entry, like every other numeric run.
+fn pushSignedDecimal(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: LeadingNum) !void {
+    if (n.neg) {
+        try l1.append(alloc, CLASS_NEG);
+        try pushNumLength(l1, alloc, n.int.len, true);
+        for (n.int) |d| try l1.append(alloc, NEG_DIGIT_TOP - (d - '0'));
+        for (n.frac) |d| try l1.append(alloc, NEG_DIGIT_TOP - (d - '0'));
+        try l1.append(alloc, NEG_END);
+    } else {
+        // The fractional digits need no marker: they are already ordered below
+        // CLASS_LETTER, so "1.5" < "1x" stays consistent with digits-before-letters,
+        // and the plain prefix rule gives 1 < 1.5 < 1.55 for free.
+        try l1.append(alloc, CLASS_DIGIT);
+        try pushNumLength(l1, alloc, n.int.len, false);
+        for (n.int) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
+        for (n.frac) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
+    }
+    try l2.append(alloc, WEIGHT_BASE + D_NONE);
+    try l3.append(alloc, CASE_NEUTRAL);
+}
+
 /// Append the primary bytes for one ASCII digit run, length-prefixed with the
 /// count of significant digits so bytewise comparison matches numeric value
 /// (the natural-sort technique: fewer significant digits => smaller number).
@@ -329,6 +450,17 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
     defer l3.deinit(alloc);
 
     var i: usize = 0;
+
+    // A sign (and, under OPT_DECIMAL, a decimal point) is only meaningful at the
+    // START of the collated string — which under -t/-k is the start of the FIELD.
+    // Anywhere else, '-' and '.' are separators, so "peter-3" < "peter-4" and
+    // "2026-07-29" keep working. Returns null for a plain unsigned integer, which
+    // falls through to the ordinary scanner below and keeps those keys unchanged.
+    if (parseLeadingNumber(s, options & OPT_DECIMAL != 0)) |ln| {
+        try pushSignedDecimal(&l1, &l2, &l3, alloc, ln);
+        i = ln.end;
+    }
+
     while (i < s.len) {
         const b = s[i];
 
@@ -599,6 +731,103 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
 }
 
+// ── Phase 6: signed / decimal numbers, but ONLY at offset 0 ──
+
+test "signed: a leading '-' before digits is a MINUS SIGN" {
+    const h: u32 = 0;
+    // Magnitude order inverts for negatives: bigger magnitude = smaller value.
+    try expectOrder(h, "-10", "-5");
+    try expectOrder(h, "-5", "-2");
+    try expectOrder(h, "-2", "0");
+    try expectOrder(h, "0", "2");
+    try expectOrder(h, "-100", "-99");
+    // ...and every negative sorts below every positive.
+    try expectOrder(h, "-1", "1");
+    try expectOrder(h, "-999999", "0");
+}
+
+test "signed: a '-' anywhere else is a SEPARATOR, not a sign" {
+    const h: u32 = 0;
+    // The rule that makes this design usable: "peter-3" must not become
+    // "peter minus three", or hyphenated names and ISO dates would sort absurdly.
+    try expectOrder(h, "peter-3", "peter-4");
+    try expectOrder(h, "peter-9", "peter-10"); // still natural-numeric
+    try expectOrder(h, "2026-07-29", "2026-08-01");
+    try expectOrder(h, "file-2.txt", "file-10.txt");
+    // A '-' NOT followed by a digit stays plain punctuation even at offset 0.
+    try expectOrder(h, "-abc", "-abd");
+    try expectOrder(h, "-", "-5"); // bare punctuation < a negative number
+}
+
+test "signed: negatives past the escalation boundary stay inverted" {
+    const h: u32 = 0;
+    // 300-digit negative vs 299-digit negative: MORE digits = MORE negative.
+    const big = try numStr(testing.allocator, '-', 300, '4');
+    defer testing.allocator.free(big);
+    const small = try numStr(testing.allocator, '-', 299, '4');
+    defer testing.allocator.free(small);
+    try expectOrder(h, big, small); // -444...(300) < -444...(299)
+}
+
+test "versions: DEFAULT treats every '.' as a separator (1.9 < 1.10)" {
+    const h: u32 = 0;
+    // The default, and the common case: dotted numbers in the wild are versions
+    // and filenames, where 1.9 < 1.10 is the wanted answer.
+    try expectOrder(h, "1.9", "1.10");
+    try expectOrder(h, "v1.9", "v1.10");
+    try expectOrder(h, "file1.9.txt", "file1.10.txt");
+    try expectOrder(h, "1.2.9", "1.2.10");
+}
+
+test "decimal: OPT_DECIMAL makes a leading number's first '.' a decimal point" {
+    const d = OPT_DECIMAL;
+    try expectOrder(d, "1.10", "1.9"); // 1.10 == 1.1 < 1.9 — the flip
+    try expectOrder(d, "0.45", "0.5");
+    try expectOrder(d, "1", "1.5");
+    try expectOrder(d, "1.5", "2");
+    try expectOrder(d, "1.5", "1.55");
+    try expectOrder(d, "2.5", "10.5"); // integer part still natural-numeric
+}
+
+test "decimal: OPT_DECIMAL only applies at offset 0 — 'v1.9' stays a version" {
+    const d = OPT_DECIMAL;
+    // The switch changes the reading of a LEADING number only; a dotted number
+    // that does not start the string is still separator-delimited.
+    try expectOrder(d, "v1.9", "v1.10");
+    try expectOrder(d, "file1.9.txt", "file1.10.txt");
+}
+
+test "decimal: OPT_DECIMAL inverts negative fractions too" {
+    const d = OPT_DECIMAL;
+    try expectOrder(d, "-1.5", "-1.4");
+    try expectOrder(d, "-1.5", "-1"); // -1.5 < -1: the NEG_END sentinel's job
+    try expectOrder(d, "-1.55", "-1.5");
+    try expectOrder(d, "-2", "-1.5");
+}
+
+test "decimal: default mode still handles negative integers correctly" {
+    const h: u32 = 0;
+    // Without OPT_DECIMAL a dotted negative is version-shaped, so only the
+    // INTEGER part is signed. Pinned so the behavior cannot drift silently.
+    try expectOrder(h, "-10", "-5"); // plain negatives: still correct
+    try expectOrder(h, "-1.4", "-1.5"); // version reading: 4 < 5 after "-1."
+}
+
+test "signed/decimal: unsigned integers are BYTE-IDENTICAL to before" {
+    // Backward-compatibility guard. A plain leading integer with no sign and no
+    // fractional part must produce exactly the pre-existing key, so the whole
+    // existing suite stays a valid regression net for this change.
+    for ([_][]const u8{ "123abc", "9", "10", "007", "0", "file2", "2026" }) |s| {
+        const key = try sortKeyAlloc(testing.allocator, 0, s);
+        defer testing.allocator.free(key);
+        // The first primary byte of a leading digit run must still be CLASS_DIGIT
+        // (not a new signed/decimal class).
+        if (s[0] >= '0' and s[0] <= '9') {
+            try testing.expectEqual(@as(u8, CLASS_DIGIT), key[0]);
+        }
+    }
+}
+
 // ── Phase 4: ligature expansions + broadened Latin coverage ──
 
 test "house: ligatures expand to two base letters (ß=ss, œ=oe, æ=ae, ĳ=ij)" {
@@ -716,7 +945,7 @@ test "invariant: sort-key order equals compare order (house + code-point)" {
     var a_buf: [16]u8 = undefined;
     var b_buf: [16]u8 = undefined;
 
-    for ([_]u32{ 0, OPT_CODE_POINT }) |opts| {
+    for ([_]u32{ 0, OPT_CODE_POINT, OPT_DECIMAL }) |opts| {
         var trial: usize = 0;
         while (trial < 2000) : (trial += 1) {
             const alen = rng.intRangeAtMost(usize, 0, a_buf.len);
