@@ -173,6 +173,60 @@ else
 		|| fail "--decimal=X rejected but message was: $err"
 fi
 
+echo "── scientific notation ──"
+assert_order "OFF by default ('e' is a letter)"  -- 1e10 2e5
+assert_order "-s orders by value"             -s -- 2e5 1e10
+assert_order "--sci alias"                  --sci -- 9e2 1e3
+assert_order "--scientific alias"    --scientific -- 1.5e3 1.6e3
+assert_order "negative exponents invert"      -s -- 1e-10 1e-5 1e5
+assert_order "capital E and explicit +"       -s -- 1E10 2E10
+assert_order "plain numbers normalized"       -s -- 999 1e3 1001
+assert_order "mixed notation list"            -s -- 1234 2e5 1e10
+assert_order "zero placement"                 -s -- -5 -1e-999 0 1e-999 5
+assert_order "negatives invert wholly"        -s -- -1e10 -2e5 -1e3 -9e2
+assert_order "bare 'e' is not an exponent"    -s -- 3employees 4employees
+
+echo "── --numeric = scientific + grouping ──"
+assert_order "-n does both"                   -n -- 1,234 2e5 999,999 1,000,000
+assert_order "--num alias"                 --num -- 999,999 1,000,000
+assert_order "--numeric alias"         --numeric -- 2e5 1,000,000
+assert_order "--numeric=, continental" --numeric=, -- 1.000,00 1,5e3 999.999,00
+assert_order "--sci does NOT absorb"        --sci -- 1,000,000 999,999
+assert_order "--dec alias"                  --dec -- 999,999.00 1,000,000.00
+
+echo "── differential: scientific vs bc over a generated corpus ──"
+if command -v bc >/dev/null 2>&1; then
+	sci_corpus="$TMPDIR/collate_sci_$$.txt"
+	awk 'BEGIN{
+		srand(20260730);
+		for (i = 0; i < 50; i++) {
+			m = int(rand()*9)+1; f = int(rand()*1000);
+			e = int(rand()*40) - 20;
+			printf "%d.%03de%d\n", m, f, e;
+		}
+	}' > "$sci_corpus"
+	sci_sorted=$("$CLI" -s "$sci_corpus" 2>/dev/null)
+	bad=0; prev=""
+	while IFS= read -r cur; do
+		if [[ -n "$prev" ]]; then
+			# bc has no exponent syntax, so expand aeb -> a*10^b by hand.
+			pm=${prev%e*}; pe=${prev#*e}
+			cm=${cur%e*};  ce=${cur#*e}
+			ok=$(echo "scale=60; ($pm * 10^($pe)) <= ($cm * 10^($ce))" | bc)
+			[[ "$ok" == "1" ]] || bad=$((bad + 1))
+		fi
+		prev="$cur"
+	done <<< "$sci_sorted"
+	if [[ "$bad" -eq 0 ]]; then
+		pass "bc agrees on all adjacent pairs of 50 scientific values"
+	else
+		fail "bc disagrees on $bad adjacent scientific pair(s)"
+	fi
+	rm -f "$sci_corpus"
+else
+	echo "  skip: bc not found" >&2
+fi
+
 echo "── negative control: what sort -g gets wrong ──"
 # 25 nines vs 1e25 both collapse to the same long double, so -g ties and falls
 # back to byte order, which is inverted here. We must NOT do that.

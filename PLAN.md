@@ -84,7 +84,23 @@ maintained_by: agent
       offset 0. Consequence, documented: do not pass `--decimal` version strings.
       7 new unit tests + 19 CLI tests. (2026-07-30 10:45 EDT)
 
-Current test count: 148 passed, 0 failed (42 Zig unit + 106 CLI integration).
+- [x] **Scientific notation (`-s`/`--sci`/`--scientific`) + `--numeric`.**
+      Numbers normalize to (exponent, mantissa) form; crucially this includes
+      numbers with NO explicit exponent (they are exponent 0), so a mixed list
+      like `1234` / `2e5` orders correctly instead of being UB as originally
+      scoped. `-n`/`--num`/`--numeric` = scientific + decimal; `--dec` alias
+      added; all three take the same `=SEP` grammar. For negatives the whole
+      magnitude inverts INCLUDING the exponent, via a composed flip term
+      (`exp_neg != value_neg`). Mutation-tested: weakening the flip term,
+      subtracting instead of adding the normalization exponent, and dropping the
+      mantissa inversion are all caught. One equivalent mutant found and REMOVED
+      rather than papered over — the zero flag's inversion for negatives was dead
+      logic, since NEG_END already outranks any exponent-sign byte; negative-zero
+      ordering is now pinned by explicit tests. 9 new unit tests + 18 CLI tests,
+      incl. a bc differential over 50 generated scientific values (exponents
+      -20..+20). (2026-07-30 14:00 EDT)
+
+Current test count: 175 passed, 0 failed (51 Zig unit + 124 CLI integration).
 
 ## Open follow-ups
 
@@ -107,7 +123,7 @@ Current test count: 148 passed, 0 failed (42 Zig unit + 106 CLI integration).
 - [ ] Numeric follow-ups now that signs and decimals exist (all documented as
       caveats in `docs/NUMERIC.md`, none currently a silent surprise):
       explicit `+` as a sign (today `+5 < -3`, which is wrong when `+` and `-`
-      are mixed); exponent notation (`1e10 < 2e5`); and deciding whether
+      are mixed); and deciding whether
       leading-zero collisions (`007` == `7`) should become a tertiary-level
       distinction so the library's order is total without relying on the CLI's
       raw-byte tie-break.

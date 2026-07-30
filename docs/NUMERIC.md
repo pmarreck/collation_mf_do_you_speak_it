@@ -185,6 +185,50 @@ The direct consequence: **do not feed `--decimal` a list of version strings.**
 `v1.9` and `v1.10` are read as 1.9 and 1.1 there, so `v1.10 < v1.9`. Without the
 flag you get version order, which is why that is the default.
 
+## Scientific notation (`--scientific`)
+
+`-s` / `--sci` / `--scientific[=SEP]` recognizes `1.5e10`, `2E-5`, `1e+3` and
+orders by **value**.
+
+Every number is normalized to **(exponent, mantissa)** form — *including numbers
+with no explicit exponent*, which are simply exponent 0. That is a deliberate
+improvement on "all inputs must be scientific or behavior is undefined": a list
+mixing `1234` and `2e5` orders correctly, because 1234 normalizes to 1.234e3 and
+3 < 5.
+
+Key layout, positive values:
+
+```
+CLASS_DIGIT
+  zero flag            0x02 = zero, 0x03 = nonzero   (zero sorts below all positives)
+  exponent sign        0x02 = negative, 0x03 = non-negative
+  exponent magnitude   length-prefixed, inverted when the exponent is negative
+  mantissa digits      significant digits, left-aligned
+```
+
+For a **negative value the whole magnitude inverts, exponent included** — a
+larger exponent means a larger magnitude and therefore a *smaller* number. The
+two inversions compose: the exponent's sign byte and magnitude each flip when
+exactly one of *(exponent is negative, value is negative)* holds. That algebra is
+the subtle part, and it is pinned by mutation testing — weakening the `flip` term
+or dropping the mantissa inversion both make tests fail.
+
+`--scientific` adds **exponents only**. It does *not* absorb digit-group
+separators; that is `--decimal`'s job.
+
+```sh
+collate -s          # exponents, no group absorption
+collate -d          # group absorption + decimal point, no exponents
+collate -n          # --numeric: both
+```
+
+`-n` / `--num` / `--numeric[=SEP]` is exactly `--scientific` + `--decimal`. All
+three accept the same `=SEP` grammar (`.` default, `,` continental), so
+`--numeric=,` reads `1.000,00` as 1000 *and* `1,5e3` as 1500.
+
+A `e` with no exponent digits after it is **not** an exponent, so `3employees`
+and `1efg` are unaffected.
+
 ## What this buys you
 
 - **Arbitrary-precision numeric ordering of runs embedded in general text**, in
@@ -214,7 +258,7 @@ Every item below is verified behavior, not speculation.
 | 3c | **`--decimal` must not be used on version strings**: `v1.10 < v1.9` | Grouping applies to embedded numbers, so a dotted number anywhere is read as a decimal. The default (no flag) gives version order. |
 | 4 | **A sign is not recognized mid-string**: `x -5` sorts before `x -10` | The offset-0 rule. Use `-t`/`-k` to make the number a field, which *is* offset 0. |
 | 5 | **An explicit `+` is not a sign**: `+5 < -3` | `+` stays punctuation, which ranks below the negative class. Mixing explicit `+` with `-` gives wrong results. |
-| 6 | **Exponent notation is not understood**: `1e10 < 2e5` | `1e10` reads as `1`, `e`, `10`. No scientific-notation parsing. |
+| 6 | **Exponent notation needs `-s`**: by default `1e10 < 2e5` | Without the flag, `1e10` reads as `1`, `e`, `10`. Pass `-s`/`--scientific` (or `-n`) to order by value. Default-off because `e` is an ordinary letter and silently reinterpreting it would corrupt text sorts. |
 | 7 | **In default (version) mode, a dotted negative only signs the integer part**: `-1.4 < -1.5` | The fraction is a separate positive run. Numerically wrong, but self-consistent as *version* ordering. Use `-d` for real-number behavior. |
 | 8 | **Under `-d`, trailing zeros in a fraction tie**: `1.5` == `1.50` | Trailing zeros are not significant; the CLI tie-breaks on raw bytes. |
 | 9 | **Digits must be ASCII `0`–`9`** | Fullwidth `５` and other Unicode digit forms fall to `CLASS_OTHER` and get no numeric treatment. See the fullwidth-folding item in PLAN.md. |

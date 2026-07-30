@@ -41,6 +41,14 @@ pub const OPT_DECIMAL: u32 = 1 << 3;
 /// would make sort order depend on data content, which is the one thing this
 /// library exists to prevent.
 pub const OPT_DECIMAL_COMMA: u32 = 1 << 4;
+/// Recognize scientific notation (`1.5e10`, `2E-5`, `1e+3`) and order numbers by
+/// VALUE. Every number is normalized to (exponent, mantissa) form — including
+/// ones with no explicit exponent, which are simply exponent 0 — so a list that
+/// mixes `1234` and `2e5` still orders correctly instead of being undefined.
+///
+/// Independent of OPT_DECIMAL: this bit adds exponent handling, OPT_DECIMAL adds
+/// digit-group absorption. `--numeric` sets both.
+pub const OPT_SCIENTIFIC: u32 = 1 << 5;
 
 // ─── Sort-key structural bytes ───────────────────────────────────────────
 const TERM: u8 = 0x00; // whole-key terminator (< everything)
@@ -350,14 +358,14 @@ const GroupedRun = struct {
     end: usize,
 };
 
-fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool) GroupedRun {
+fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool, absorb: bool) GroupedRun {
     var i = start;
     while (i < s.len) {
         if (s[i] >= '0' and s[i] <= '9') {
             i += 1;
             continue;
         }
-        const sl = groupSepLen(s, i, comma_decimal);
+        const sl = if (absorb) groupSepLen(s, i, comma_decimal) else 0;
         // Absorb ONLY when a digit follows, i.e. the separator sits BETWEEN two
         // digits. That is what keeps "Smith 1 000" from swallowing the space
         // after the name, and "abc, 5" from swallowing the comma.
@@ -443,6 +451,118 @@ fn pushGroupedNumber(
         try emitSigDigits(l1, alloc, int_slice, false);
         try emitFracDigits(l1, alloc, frac_slice, false);
     }
+    try l2.append(alloc, WEIGHT_BASE + D_NONE);
+    try l3.append(alloc, CASE_NEUTRAL);
+}
+
+/// Scan an explicit `e`/`E` exponent at `s[i]`, returning its value and the index
+/// just past it. A bare `e` with no digits (e.g. "3employees") is NOT an
+/// exponent, so the letter is left to the ordinary scanner.
+fn scanExponent(s: []const u8, i: usize) ?struct { exp: i64, end: usize } {
+    if (i >= s.len or (s[i] != 'e' and s[i] != 'E')) return null;
+    var j = i + 1;
+    var neg = false;
+    if (j < s.len and (s[j] == '+' or s[j] == '-')) {
+        neg = s[j] == '-';
+        j += 1;
+    }
+    if (j >= s.len or s[j] < '0' or s[j] > '9') return null;
+    var v: i64 = 0;
+    while (j < s.len and s[j] >= '0' and s[j] <= '9') : (j += 1) {
+        // Saturate rather than overflow; an exponent this large is already
+        // beyond any representable magnitude and ordering is preserved.
+        if (v < 1_000_000_000) v = v * 10 + @as(i64, s[j] - '0');
+    }
+    return .{ .exp = if (neg) -v else v, .end = j };
+}
+
+/// Emit a signed exponent so that memcmp reproduces numeric order.
+///
+/// `value_neg` flips the whole comparison, because for a negative VALUE a larger
+/// exponent means a larger magnitude and therefore a SMALLER number. The two
+/// inversions compose: the sign byte flips when exactly one of (exponent is
+/// negative, value is negative) holds, and the magnitude inverts under the same
+/// condition.
+fn pushExponent(l1: *L1, alloc: std.mem.Allocator, exp: i64, value_neg: bool) !void {
+    const exp_neg = exp < 0;
+    const flip = exp_neg != value_neg;
+    try l1.append(alloc, if (flip) WEIGHT_BASE else WEIGHT_BASE + 1);
+    const mag: u64 = @intCast(if (exp_neg) -exp else exp);
+    // Render the magnitude in decimal, then reuse the ordinary length+digits
+    // machinery so arbitrary exponent widths order correctly.
+    var buf: [20]u8 = undefined;
+    var n: usize = 0;
+    var v = mag;
+    if (v == 0) {
+        buf[0] = '0';
+        n = 1;
+    } else {
+        while (v > 0) : (v /= 10) {
+            buf[n] = @intCast('0' + (v % 10));
+            n += 1;
+        }
+        std.mem.reverse(u8, buf[0..n]);
+    }
+    const digits = buf[0..n];
+    try pushNumLength(l1, alloc, countSigDigits(digits), flip);
+    try emitSigDigits(l1, alloc, digits, flip);
+}
+
+/// Emit one number in scientific normal form: a zero flag, then the decimal
+/// exponent of the leading significant digit, then the significant digits.
+///
+/// Normalizing plain numbers as exponent 0 is what lets `1234` and `2e5` be
+/// compared correctly in the same list.
+fn pushScientific(
+    l1: *L1,
+    l2: *L1,
+    l3: *L1,
+    alloc: std.mem.Allocator,
+    s: []const u8,
+    run: GroupedRun,
+    exp: i64,
+    neg: bool,
+) !void {
+    const int_slice = s[run.int_start..run.int_end];
+    const frac_slice = s[run.frac_start..run.frac_end];
+    const int_sig = countSigDigits(int_slice);
+
+    // Leading zeros of the fraction are placeholders, not significant digits.
+    var lead_zeros: usize = 0;
+    if (int_sig == 0) {
+        while (lead_zeros < frac_slice.len and frac_slice[lead_zeros] == '0') lead_zeros += 1;
+    }
+    const frac_sig = frac_slice[if (int_sig == 0) lead_zeros else 0..];
+    const is_zero = int_sig == 0 and frac_sig.len == 0;
+
+    try l1.append(alloc, if (neg) CLASS_NEG else CLASS_DIGIT);
+    if (is_zero) {
+        // Zero has no meaningful exponent. For a POSITIVE value this flag is
+        // load-bearing: 0x02 here versus 0x03 for nonzero puts zero below every
+        // positive. For a NEGATIVE value the flag is irrelevant and deliberately
+        // not inverted — NEG_END (0xFF) already beats any exponent-sign byte, so
+        // every negative nonzero sorts below negative zero without help.
+        // (Confirmed by mutation: inverting it here is an equivalent mutant.)
+        try l1.append(alloc, WEIGHT_BASE);
+        if (neg) try l1.append(alloc, NEG_END);
+        try l2.append(alloc, WEIGHT_BASE + D_NONE);
+        try l3.append(alloc, CASE_NEUTRAL);
+        return;
+    }
+    try l1.append(alloc, if (neg) WEIGHT_BASE else WEIGHT_BASE + 1);
+
+    // Decimal exponent of the leading significant digit.
+    const e: i64 = if (int_sig > 0)
+        @as(i64, @intCast(int_sig)) - 1
+    else
+        -@as(i64, @intCast(lead_zeros)) - 1;
+    try pushExponent(l1, alloc, e + exp, neg);
+
+    // Significant digits, most significant first.
+    try emitSigDigits(l1, alloc, int_slice, neg);
+    try emitFracDigits(l1, alloc, frac_sig, neg);
+    if (neg) try l1.append(alloc, NEG_END);
+
     try l2.append(alloc, WEIGHT_BASE + D_NONE);
     try l3.append(alloc, CASE_NEUTRAL);
 }
@@ -598,8 +718,12 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
     // Anywhere else, '-' and '.' are separators, so "peter-3" < "peter-4" and
     // "2026-07-29" keep working. Returns null for a plain unsigned integer, which
     // falls through to the ordinary scanner below and keeps those keys unchanged.
-    const decimal = options & OPT_DECIMAL != 0;
+    const sci = options & OPT_SCIENTIFIC != 0;
+    const decimal = options & OPT_DECIMAL != 0 or sci;
     const comma_dec = options & OPT_DECIMAL_COMMA != 0;
+    // Grouping absorption belongs to OPT_DECIMAL; OPT_SCIENTIFIC only adds
+    // exponents, so scientific-alone must not swallow separators.
+    const absorb = options & OPT_DECIMAL != 0;
 
     // In decimal mode the grouped scanner owns ALL number scanning (below), so
     // only the plain house-style path consults parseLeadingNumber here.
@@ -619,9 +743,15 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
         if (decimal) {
             const neg = i == 0 and b == '-' and s.len > 1 and s[1] >= '0' and s[1] <= '9';
             if (neg or (b >= '0' and b <= '9')) {
-                const run = scanGroupedNumber(s, if (neg) i + 1 else i, comma_dec);
-                try pushGroupedNumber(&l1, &l2, &l3, alloc, s, run, neg);
-                i = run.end;
+                const run = scanGroupedNumber(s, if (neg) i + 1 else i, comma_dec, absorb);
+                if (sci) {
+                    const ex = scanExponent(s, run.end);
+                    try pushScientific(&l1, &l2, &l3, alloc, s, run, if (ex) |e| e.exp else 0, neg);
+                    i = if (ex) |e| e.end else run.end;
+                } else {
+                    try pushGroupedNumber(&l1, &l2, &l3, alloc, s, run, neg);
+                    i = run.end;
+                }
                 continue;
             }
         }
@@ -891,6 +1021,88 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 8: scientific notation ──
+
+test "scientific: OFF by default — 'e' is just a letter" {
+    const h: u32 = 0;
+    try expectOrder(h, "1e10", "2e5"); // digit run 1 < 2; the default reading
+}
+
+test "scientific: compares by VALUE, exponent first" {
+    const s = OPT_SCIENTIFIC;
+    try expectOrder(s, "2e5", "1e10"); // 200000 < 10000000000
+    try expectOrder(s, "9e2", "1e3"); // 900 < 1000
+    try expectOrder(s, "1.5e3", "1.6e3"); // same exponent, mantissa decides
+    try expectOrder(s, "1e-10", "1e-5"); // negative exponents invert
+    try expectOrder(s, "1e-5", "1e5");
+    try expectOrder(s, "5e-1", "5e0");
+    try expectOrder(s, "1E10", "2E10"); // capital E too
+    try expectOrder(s, "1e+5", "1e+10"); // explicit + in the exponent
+}
+
+test "scientific: normalizes plain numbers too, so mixed lists work" {
+    const s = OPT_SCIENTIFIC;
+    // A number without an exponent is just exponent 0 — normalizing it means a
+    // list mixing both notations still orders correctly, rather than being UB.
+    try expectOrder(s, "1234", "2e5"); // 1234 < 200000
+    try expectOrder(s, "999", "1e3"); // 999 < 1000
+    try expectOrder(s, "1e3", "1001"); // 1000 < 1001
+    try expectOrder(s, "0.5", "5e0"); // 0.5 < 5
+}
+
+test "scientific: agrees with decimal mode on the cases they share" {
+    const s = OPT_SCIENTIFIC;
+    try expectOrder(s, "1.25", "1.5"); // varied precision
+    try expectOrder(s, "0.45", "0.5");
+    try expectOrder(s, "999999", "1000000");
+    try expectOrder(s, "10.5", "10.55");
+}
+
+test "scientific: zero sorts below every positive, above every negative" {
+    const s = OPT_SCIENTIFIC;
+    try expectOrder(s, "0", "1e-999"); // zero is smaller than any tiny positive
+    try expectOrder(s, "0", "0.001");
+    try expectOrder(s, "-1e-999", "0"); // ...and bigger than any tiny negative
+    try expectOrder(s, "0.0", "1");
+    // Negative zero: every negative nonzero must sort below it. This is carried
+    // by NEG_END, not by the zero flag — pinned here because mutation testing
+    // showed the ordering was otherwise unverified.
+    try expectOrder(s, "-5", "-0");
+    try expectOrder(s, "-1e-999", "-0");
+    try expectOrder(s, "-0", "0"); // matches the documented -0 < 0 caveat
+}
+
+test "scientific: negatives invert the WHOLE magnitude, exponent included" {
+    const s = OPT_SCIENTIFIC;
+    try expectOrder(s, "-1e10", "-2e5"); // -1e10 < -200000
+    try expectOrder(s, "-1e3", "-9e2"); // -1000 < -900
+    try expectOrder(s, "-1e-5", "-1e-10"); // closer to zero is bigger
+    try expectOrder(s, "-1.6e3", "-1.5e3"); // mantissa inverts too
+    try expectOrder(s, "-1.5", "-1"); // mantissa prefix case
+    try expectOrder(s, "-5", "-1e-999");
+}
+
+test "scientific: --numeric == scientific + grouping absorption" {
+    const n = OPT_SCIENTIFIC | OPT_DECIMAL;
+    try expectOrder(n, "999,999", "1,000,000"); // grouping absorbed
+    try expectOrder(n, "1,234", "2e5"); // ...and exponents understood
+    try expectOrder(n, "2e5", "1,000,000");
+}
+
+test "scientific: OPT_DECIMAL_COMMA also moves the mantissa's decimal mark" {
+    const n = OPT_SCIENTIFIC | OPT_DECIMAL | OPT_DECIMAL_COMMA;
+    try expectOrder(n, "1,5e3", "1,6e3"); // ',' is the decimal mark here
+    try expectOrder(n, "999.999", "1.000.000"); // '.' groups
+}
+
+test "scientific: a bare 'e' with no exponent digits is not an exponent" {
+    const s = OPT_SCIENTIFIC;
+    // "1e" and "3employees" must not swallow the letter as an exponent marker.
+    try expectOrder(s, "1e", "2e");
+    try expectOrder(s, "3employees", "4employees");
+    try expectOrder(s, "1efg", "2efg");
 }
 
 // ── Phase 7: grouped numbers — absorb digit-group separators under OPT_DECIMAL ──

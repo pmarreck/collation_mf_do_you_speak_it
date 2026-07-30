@@ -73,6 +73,9 @@ collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
   -d, --decimal[=SEP]          Declare DECIMAL input; SEP is the decimal mark,
                                '.' (default) or ','. Digit-group separators are
                                then absorbed (999,999.00 < 1,000,000.00)
+  -s, --sci, --scientific[=SEP]  Order by value with exponents (2e5 < 1e10);
+                               plain numbers normalize as exponent 0
+  -n, --num, --numeric[=SEP]   Both -d and -s
       --version-sort           Explicit form of the default dot handling
   -h, --help                   Show help
       --about                  One-line version + platform

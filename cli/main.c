@@ -93,6 +93,12 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "                               values order alike in any convention.\n"
         "                               Default: every '.' is a separator, giving\n"
         "                               version order (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Recognize scientific notation and order\n"
+        "                               by value (2e5 < 1e10). Plain numbers are\n"
+        "                               normalized as exponent 0 so mixed lists\n"
+        "                               work. Does NOT absorb group separators.\n"
+        "  -n, --num, --numeric[=SEP]   Both of the above: exponents AND\n"
+        "                               digit-group absorption.\n"
         "      --version-sort           Explicit form of the default dot handling\n"
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
@@ -131,6 +137,10 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "                               andere von . ,) werden dann zwischen Ziffern\n"
         "                               absorbiert. Standard: jedes '.' ist ein\n"
         "                               Trenner (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=TRZ]  Wissenschaftliche Notation erkennen und\n"
+        "                               nach Wert sortieren (2e5 < 1e10). Zahlen\n"
+        "                               ohne Exponent gelten als Exponent 0.\n"
+        "  -n, --num, --numeric[=TRZ]   Beides: Exponenten UND Tausendertrenner.\n"
         "      --version-sort           Ausdrückliche Form des Standardverhaltens\n"
         "  -h, --help / --hilfe         Diese Hilfe anzeigen\n"
         "      --about                  Version + Plattform in einer Zeile\n"
@@ -456,11 +466,38 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
                 options |= COLLATION_MF_CODE_POINT;
             } else if (strcmp(a, "-d") == 0 || strcmp(a, "--decimal") == 0
-                       || strcmp(a, "--decimals") == 0) {
+                       || strcmp(a, "--decimals") == 0 || strcmp(a, "--dec") == 0) {
                 options |= COLLATION_MF_DECIMAL;
                 options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+            } else if (strcmp(a, "-s") == 0 || strcmp(a, "--scientific") == 0
+                       || strcmp(a, "--sci") == 0) {
+                options |= COLLATION_MF_SCIENTIFIC;
+            } else if (strcmp(a, "-n") == 0 || strcmp(a, "--numeric") == 0
+                       || strcmp(a, "--num") == 0) {
+                options |= COLLATION_MF_SCIENTIFIC | COLLATION_MF_DECIMAL;
+                options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+            } else if (strncmp(a, "--scientific=", 13) == 0
+                       || strncmp(a, "--sci=", 6) == 0
+                       || strncmp(a, "--numeric=", 10) == 0
+                       || strncmp(a, "--num=", 6) == 0) {
+                /* Same SEP grammar as --decimal; --numeric also turns on
+                 * digit-group absorption, --scientific does not. */
+                const char *sep = strchr(a, '=') + 1;
+                options |= COLLATION_MF_SCIENTIFIC;
+                if (a[2] == 'n') options |= COLLATION_MF_DECIMAL;
+                if (strcmp(sep, ".") == 0) {
+                    options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                } else if (strcmp(sep, ",") == 0) {
+                    options |= COLLATION_MF_DECIMAL_COMMA;
+                } else {
+                    fprintf(stderr,
+                            "collate: decimal separator must be '.' or ',' "
+                            "(got \"%s\")\n", sep);
+                    return 2;
+                }
             } else if (strncmp(a, "--decimal=", 10) == 0
-                       || strncmp(a, "--decimals=", 11) == 0) {
+                       || strncmp(a, "--decimals=", 11) == 0
+                       || strncmp(a, "--dec=", 6) == 0) {
                 /* Attached form only: a detached value would be ambiguous with
                  * the positional FILE argument. */
                 const char *sep = strchr(a, '=') + 1;

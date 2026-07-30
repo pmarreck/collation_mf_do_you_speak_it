@@ -68,6 +68,15 @@ extern "C" {
  * both work. */
 #define COLLATION_MF_DECIMAL_COMMA  (1u << 4)
 
+/* Recognize scientific notation (1.5e10, 2E-5, 1e+3) and order by VALUE.
+ * Every number is normalized to (exponent, mantissa) form — including ones with
+ * no explicit exponent, which are simply exponent 0 — so a list mixing `1234`
+ * and `2e5` orders correctly rather than being undefined.
+ *
+ * Independent of COLLATION_MF_DECIMAL: this bit adds exponents, DECIMAL adds
+ * digit-group absorption. Setting both is what `--numeric` does. */
+#define COLLATION_MF_SCIENTIFIC     (1u << 5)
+
 /* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
 
 #define COLLATION_MF_LESS     (-1)
