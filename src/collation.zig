@@ -52,11 +52,24 @@ const D_CARON: u8 = 8;
 const D_MACRON: u8 = 9;
 const D_DOT: u8 = 10;
 const D_STROKE: u8 = 11;
+// Ranks below are APPENDED deliberately: new ranks never perturb the existing
+// relative order, because every code point that uses one was previously absent
+// from the table entirely (it fell through to CLASS_OTHER).
+const D_BREVE: u8 = 12; // Romanian ă
+const D_COMMA: u8 = 13; // Romanian ș/ț (comma-below, distinct from cedilla)
+const D_MIDDOT: u8 = 14; // Catalan ŀ
 
 // Tertiary (case) weights.
 const CASE_LOWER: u8 = 0x02;
 const CASE_UPPER: u8 = 0x03;
 const CASE_NEUTRAL: u8 = 0x02; // non-letters
+// A ligature's expanded letters carry their own tertiary rank so that `ß` and
+// `ss` share a primary AND secondary level (hence sort adjacent) yet remain
+// DISTINGUISHABLE — without this the two would compare fully equal and the
+// order would stop being total. Mirrors DUCET, which separates ligatures from
+// their spelled-out forms at the tertiary level only.
+const CASE_LOWER_LIG: u8 = 0x04;
+const CASE_UPPER_LIG: u8 = 0x05;
 
 /// A folded letter: an ASCII base ('a'..'z'), a diacritic rank, and case.
 const Letter = struct { base: u8, dia: u8, upper: bool };
@@ -168,6 +181,48 @@ fn foldLetter(cp: u21) ?Letter {
         0x017D => .{ .base = 'z', .dia = D_CARON, .upper = true },
         0x017E => .{ .base = 'z', .dia = D_CARON, .upper = false },
 
+        // ── Romanian: ă (breve) and ș/ț (comma-below) ──
+        0x0102 => .{ .base = 'a', .dia = D_BREVE, .upper = true },
+        0x0103 => .{ .base = 'a', .dia = D_BREVE, .upper = false },
+        0x0218 => .{ .base = 's', .dia = D_COMMA, .upper = true },
+        0x0219 => .{ .base = 's', .dia = D_COMMA, .upper = false },
+        0x021A => .{ .base = 't', .dia = D_COMMA, .upper = true },
+        0x021B => .{ .base = 't', .dia = D_COMMA, .upper = false },
+        // The cedilla spellings Ş/ş/Ţ/ţ are pervasively (if incorrectly) used
+        // for Romanian on legacy systems, so fold them to the same bases.
+        0x015E => .{ .base = 's', .dia = D_CEDILLA, .upper = true },
+        0x015F => .{ .base = 's', .dia = D_CEDILLA, .upper = false },
+        0x0162 => .{ .base = 't', .dia = D_CEDILLA, .upper = true },
+        0x0163 => .{ .base = 't', .dia = D_CEDILLA, .upper = false },
+
+        // ── Catalan: ŀ is the first half of the ŀl digraph, which collates as
+        // plain "ll"; folding to a bare 'l' gets that for free. ──
+        0x013F => .{ .base = 'l', .dia = D_MIDDOT, .upper = true },
+        0x0140 => .{ .base = 'l', .dia = D_MIDDOT, .upper = false },
+
+        else => null,
+    };
+}
+
+/// One code point, two base letters: a *ligature expansion*. `ß` must collate as
+/// `ss`, `œ` as `oe` — a 1:1 character->letter map cannot express this, which is
+/// why these previously fell through to CLASS_OTHER and sorted after every
+/// letter. Kept as a SEPARATE table from `foldLetter` for two reasons: it is
+/// consulted only after `foldLetter` misses (so the ASCII hot path pays
+/// nothing), and a future locale tailoring swaps the expansion set wholesale
+/// (German phonebook order wants ä->ae, which dictionary order must not do).
+const Expansion = struct { b0: u8, b1: u8, upper: bool };
+
+fn foldExpansion(cp: u21) ?Expansion {
+    return switch (cp) {
+        0x00C6 => .{ .b0 = 'a', .b1 = 'e', .upper = true }, // Æ
+        0x00E6 => .{ .b0 = 'a', .b1 = 'e', .upper = false }, // æ
+        0x0152 => .{ .b0 = 'o', .b1 = 'e', .upper = true }, // Œ
+        0x0153 => .{ .b0 = 'o', .b1 = 'e', .upper = false }, // œ
+        0x00DF => .{ .b0 = 's', .b1 = 's', .upper = false }, // ß
+        0x1E9E => .{ .b0 = 's', .b1 = 's', .upper = true }, // ẞ
+        0x0132 => .{ .b0 = 'i', .b1 = 'j', .upper = true }, // Ĳ
+        0x0133 => .{ .b0 = 'i', .b1 = 'j', .upper = false }, // ĳ
         else => null,
     };
 }
@@ -270,6 +325,17 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             try pushLetterPrimary(&l1, alloc, lt.base);
             try l2.append(alloc, WEIGHT_BASE + lt.dia);
             try l3.append(alloc, if (lt.upper) CASE_UPPER else CASE_LOWER);
+        } else if (foldExpansion(cp)) |ex| {
+            // TWO letters from one code point. Each level must receive exactly
+            // two entries or the levels desynchronize against the spelled-out
+            // form and the ligature stops sorting adjacent to it.
+            try pushLetterPrimary(&l1, alloc, ex.b0);
+            try pushLetterPrimary(&l1, alloc, ex.b1);
+            const case: u8 = if (ex.upper) CASE_UPPER_LIG else CASE_LOWER_LIG;
+            for (0..2) |_| {
+                try l2.append(alloc, WEIGHT_BASE + D_NONE);
+                try l3.append(alloc, case);
+            }
         } else if (cp < 0x80 and (b > ' ')) {
             // ASCII punctuation/symbol: ordered among itself by code point.
             try l1.append(alloc, CLASS_PUNCT);
@@ -408,12 +474,120 @@ test "house: NFC precomposed accents fold to a base letter" {
     try expectOrder(h, "d", "é");
 }
 
+// ── Phase 4: ligature expansions + broadened Latin coverage ──
+
+test "house: ligatures expand to two base letters (ß=ss, œ=oe, æ=ae, ĳ=ij)" {
+    const h: u32 = 0;
+    // A ligature's PRIMARY level is identical to its spelled-out form, so it
+    // lands ADJACENT to that form instead of after every letter (which is where
+    // the old CLASS_OTHER fallthrough put it). The tertiary level keeps the two
+    // distinct, so the order stays total rather than collapsing to a tie.
+    try expectOrder(h, "strasse", "straße");
+    try expectOrder(h, "straße", "stratos"); // primary "ss" < "to"
+    try expectOrder(h, "coeur", "cœur");
+    try expectOrder(h, "cœur", "cor"); // primary "oe" < "or"
+    try expectOrder(h, "aeon", "æon");
+    try expectOrder(h, "ijs", "ĳs");
+}
+
+test "house: ligature primary weight equals the spelled-out digraph" {
+    const h: u32 = 0;
+    // The point of an expansion: only the TERTIARY level may differ. If the
+    // primary or secondary differed, the ligature would not sort adjacent.
+    for ([_][2][]const u8{
+        .{ "straße", "strasse" },
+        .{ "cœur", "coeur" },
+        .{ "æon", "aeon" },
+        .{ "ĳs", "ijs" },
+    }) |pair| {
+        const kl = try sortKeyAlloc(testing.allocator, h, pair[0]);
+        defer testing.allocator.free(kl);
+        const ks = try sortKeyAlloc(testing.allocator, h, pair[1]);
+        defer testing.allocator.free(ks);
+        // Keys are L1 ++ SEP ++ L2 ++ SEP ++ L3 ++ TERM; compare through L2.
+        const cut = std.mem.indexOfScalar(u8, kl, SEP).? + 1;
+        const l2_end = std.mem.indexOfScalarPos(u8, kl, cut, SEP).?;
+        try testing.expectEqualSlices(u8, kl[0..l2_end], ks[0..l2_end]);
+        try testing.expect(!std.mem.eql(u8, kl, ks)); // ...but not identical
+    }
+}
+
+test "house: Romanian ă/ș/ț fold to base letters, not CLASS_OTHER" {
+    const h: u32 = 0;
+    // Base letter must dominate: previously these fell through to CLASS_OTHER
+    // (0x50 > CLASS_LETTER 0x40) and sorted after EVERY letter.
+    try expectOrder(h, "ăb", "az"); // base 'a' run, 'b' < 'z'
+    try expectOrder(h, "șa", "tz"); // base 's' < base 't'
+    try expectOrder(h, "ța", "uz"); // base 't' < base 'u'
+    // ...and the diacritic is only the secondary tie-break.
+    try expectOrder(h, "sapa", "șapa");
+    try expectOrder(h, "tara", "țara");
+    try expectOrder(h, "acas", "acăs");
+    // The cedilla spellings commonly used for Romanian ș/ț fold too.
+    try expectOrder(h, "sa", "şa");
+    try expectOrder(h, "ta", "ţa");
+}
+
+test "house: Catalan ŀ folds to plain 'l' so ŀl sorts as ll" {
+    const h: u32 = 0;
+    try expectOrder(h, "cella", "ceŀla"); // same primary, middot is secondary
+    try expectOrder(h, "ceŀla", "cellb"); // base letters still dominate
+}
+
+/// Does `s` collate as a LETTER? Read off the key's first primary byte rather
+/// than by calling the fold tables, so the assertion is one level removed from
+/// the implementation it checks.
+fn collatesAsLetter(s: []const u8) !bool {
+    const key = try sortKeyAlloc(testing.allocator, 0, s);
+    defer testing.allocator.free(key);
+    return key.len > 0 and key[0] == CLASS_LETTER;
+}
+
+test "house: declared Latin coverage is EXHAUSTIVELY letter-class" {
+    // A classifier over the whole declared SET, not a spot-check of examples.
+    // Every character any supported Western-European language needs must land in
+    // CLASS_LETTER; one omission here is a character that silently sorts after
+    // every letter (the bug class this phase fixed).
+    const covered = [_][]const u8{
+        // French
+        "à", "â", "ä", "ç", "é", "è", "ê", "ë", "î", "ï", "ô", "ö", "ù", "û", "ü", "ÿ", "æ", "œ",
+        // Spanish / Italian / Portuguese / Catalan
+        "á",  "í",  "ó",  "ú",  "ñ", "ã", "õ", "ì", "ò", "ŀ",
+        // German / Dutch
+        "ß",  "ĳ",
+        // Romanian (incl. the legacy cedilla spellings)
+        "ă",  "ș",  "ț",  "ş",  "ţ",
+        // Uppercase forms must fold too.
+        "Æ",  "Œ",  "ẞ",  "Ĳ",  "Ă", "Ș", "Ț", "É", "Ü", "Ñ",
+    };
+    for (covered) |c| {
+        if (!try collatesAsLetter(c)) {
+            std.debug.print("NOT letter-class: {s}\n", .{c});
+            return error.CoverageGap;
+        }
+    }
+}
+
+test "house: out-of-scope code points still degrade to CLASS_OTHER" {
+    // MFIC specificity corpus: the expansion work must NOT turn the fold table
+    // into an accept-everything classifier. These must still sort after "zz".
+    const h: u32 = 0;
+    for ([_][]const u8{ "中", "€", "Ω", "д", "🎉" }) |other| {
+        try expectOrder(h, "zz", other);
+        try testing.expect(!try collatesAsLetter(other));
+    }
+}
+
 // ── Invariant: get_sort_key memcmp order == strcoll order (both modes) ──
 
 test "invariant: sort-key order equals compare order (house + code-point)" {
     var seed = std.Random.DefaultPrng.init(0xC0FFEE);
     const rng = seed.random();
-    const alphabet = "abcABC 12.é�zñ-_";
+    // Indexed by BYTE, not code point, so this deliberately manufactures torn
+    // and invalid UTF-8 sequences too. The ligatures and Romanian letters are
+    // present because expansions are the one construct that emits a DIFFERENT
+    // number of elements per level, i.e. the likeliest way to break invariant #3.
+    const alphabet = "abcABC 12.é�zñ-_ßœæĳășțŀ";
     var a_buf: [16]u8 = undefined;
     var b_buf: [16]u8 = undefined;
 

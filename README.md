@@ -33,9 +33,13 @@ In priority order:
 4. **Diacritics as a secondary tie-break.** `café` sorts near `cafe`
    (base letter `e`), *not* dead-last like raw code points: `café < cafz`.
 5. **Case as the final tie-break.** lowercase before uppercase.
-6. **NFC-aware for common precomposed Latin accents** (v1 subset — see Limits).
-7. **No OS locale, ever.** Reproducible everywhere.
-8. **Code-point fallback** (`--code-point`) == pure UTF-8 byte order.
+6. **Ligatures expand.** `ß`→`ss`, `œ`→`oe`, `æ`→`ae`, `ĳ`→`ij`, so `straße`
+   lands next to `strasse` and `cœur` next to `coeur` instead of after every
+   letter. The two stay distinguishable at the tertiary level, so the order
+   remains total.
+7. **NFC-aware for common precomposed Latin accents** (v1 subset — see Limits).
+8. **No OS locale, ever.** Reproducible everywhere.
+9. **Code-point fallback** (`--code-point`) == pure UTF-8 byte order.
 
 ## Build & test
 
@@ -142,9 +146,35 @@ See [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) and [RULES.md](RULES.md).
 
 ## Limits (v1)
 
-- Diacritic folding covers Latin-1 Supplement + a common Latin Extended-A
-  subset. Unknown code points degrade gracefully to code-point order (sorted
-  after known letters).
+**One tailoring, not many.** The house style is a single global ordering, closest
+to Unicode's DUCET **root** / Western-European default. That makes it *native*
+for the Romance languages — accent-as-secondary is exactly the French, Spanish,
+Italian, Portuguese, and Catalan rule — and correct for German *dictionary*
+order. It is deliberately **non-native** for languages that treat accented forms
+as distinct letters at the primary level:
+
+| language | wants | we give |
+|---|---|---|
+| Swedish, Finnish | `å ä ö` as letters after `z` | folded to `a`/`o` |
+| Danish, Norwegian | `æ ø å` as letters after `z` | `æ`→`ae`, `ø`→`o` |
+| Czech, Slovak, Polish, Croatian | `č ř š ž` etc. as separate letters | folded to base |
+| Hungarian | `cs dz dzs gy ly ny sz ty zs` as letters | not contracted |
+| Estonian, Latvian, Lithuanian | reordered alphabets (`z` mid-alphabet in `et`) | base order |
+| Turkish | dotless `ı` distinct from `i` | `ı` uncovered entirely |
+| Spanish | `ñ` a letter after `n` | folded to base `n` |
+| Canadian French (`fr-CA`) | accents compared *backwards* | forward |
+
+This is a consequence of RULES.md #2 (never consult the OS locale), not an
+oversight — one linear order cannot satisfy Swedish and German simultaneously.
+Per-locale tailoring is the deferred fix. Note that broadening `æ`→`ae` in v1.1
+*removed* an accidental correctness for Danish/Norwegian, where `æ` previously
+landed after `z` by virtue of being unrecognized.
+
+- Latin coverage is complete for French, Spanish, Italian, Portuguese, Catalan,
+  Romanian, German, and Dutch (verified as a set, both directions, by
+  `tests/integration/latin_coverage.sh`). Icelandic `ð`/`þ` and the Nordic
+  `ø`/`å`-as-letters are **not** covered. Unknown code points degrade gracefully
+  to code-point order (sorted after known letters).
 - NFC handling covers common **precomposed** Latin accents; **decomposed**
   combining-mark sequences are not yet folded (the combining mark is treated as
   its own "other" element). Full normalization is deferred.

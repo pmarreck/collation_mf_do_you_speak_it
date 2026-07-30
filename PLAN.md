@@ -35,7 +35,22 @@ maintained_by: agent
       annotations for every notable path (there were zero). Reindexed codescan.
       (2026-07-29 13:15 EDT)
 
-Current test count: 63 passed, 0 failed (15 Zig unit + 48 CLI integration).
+- [x] **Ligature expansions + broadened Latin coverage.** New `foldExpansion`
+      table (ß→ss, ẞ→SS, œ/Œ→oe, æ/Æ→ae, ĳ/Ĳ→ij) — a 1:1 character→letter map
+      could not express these, so they had all been falling through to
+      CLASS_OTHER and sorting after EVERY letter. Expansions emit two L1 letters
+      and two L2/L3 bytes to keep levels aligned, and carry a distinct tertiary
+      rank (CASE_*_LIG) so `ß` and `ss` share primary+secondary (sort adjacent)
+      without collapsing to a tie. Added Romanian ă/ș/ț + legacy cedilla ş/ţ,
+      and Catalan ŀ (folds to bare `l`, so `ŀl` collates as `ll`). Coverage now
+      100% for French, Spanish, Italian, Portuguese, Catalan, Romanian, German,
+      Dutch (was 16/18, 7/7, 8/8, 12/12, 10/11, **2/7**, **3/4**, 5/6).
+      6 new Zig unit tests + `tests/integration/latin_coverage.sh` (20 assertions,
+      sensitivity over the declared set + specificity corpus). Both new
+      assertions mutation-verified: knocking out the ș row and desyncing the
+      expansion level-count each produce a failure. (2026-07-29 23:24 EDT)
+
+Current test count: 89 passed, 0 failed (21 Zig unit + 68 CLI integration).
 
 ## Open follow-ups
 
@@ -55,8 +70,25 @@ Current test count: 63 passed, 0 failed (15 Zig unit + 48 CLI integration).
       the obvious first tenant) or remove it.
 - [ ] `strcoll8` allocates two temp keys per call; add an allocation-free
       streaming level-by-level comparator for the common early-exit case.
-- [ ] Numeric significant-digit length capped at 250 (byte-sized prefix);
-      widen if a real corpus needs >250-digit numbers.
+- [ ] **Lift the 250-significant-digit numeric cap using BLIP's escalating
+      length-class idea** (Peter, 2026-07-29 — see `~/Code/BLIP`, his own
+      "Byte Length Integer Prefix" project). Today `pushNumericPrimary` puts the
+      significant-digit count in ONE byte (`WEIGHT_BASE + N`, N ≤ 250), so two
+      numbers agreeing on their first 250 digits compare EQUAL. BLIP-BE solves
+      the general problem — magnitude class in the header, big-endian payload
+      after, `memcmp`-ordered, and its continuation flag (bit 5) makes the length
+      field unbounded, which is exactly the field we capped.
+      **Caveat: BLIP cannot drop in verbatim.** Its payload is raw LE/BE bytes
+      that freely contain 0x00 and 0x01 (e.g. 256 = `[0xC2,0x01,0x00]`), which
+      are our TERM and SEP — that would violate RULES.md #4 (C-safe keys, no
+      interior NUL). We don't need BLIP's payload though: ours is already
+      digits-as-bytes. Adopt the *length-prefix structure only*, byte-range
+      restricted to >= 0x02: keep `0x02+N` for N <= 250 (backward compatible for
+      every realistic input), and reserve 0xFD/0xFE/0xFF as escalating
+      "longer length follows" classes with the length itself in base-253
+      big-endian. Ordering is preserved by construction, since any escalation
+      byte exceeds every single-byte length and more digits always means a
+      larger number.
 
 ## Deferred (future, noted in README Limits)
 

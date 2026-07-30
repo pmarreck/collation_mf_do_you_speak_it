@@ -26,7 +26,7 @@ annotate=[
 	include/collation_mf_do_you_speak_it.h = Public C FFI header, modeled on ICU4C ucol_* but UTF-8 bytes+len; option bits (CODE_POINT/NUMERIC/CASE_SENSITIVE)
 	result = Nix build output symlink (gitignored GC root); ./build refreshes it
 	src = Pure Zig core + C FFI adapter (hexagonal: no I/O below the CLI)
-	src/collation.zig = PURE core, no I/O: multi-level sort-key builder (L1 structural class+base letter, L2 diacritic, L3 case), foldLetter table, natural-numeric length-prefixed digit runs, compareAlloc; all unit tests
+	src/collation.zig = PURE core, no I/O: multi-level sort-key builder (L1 structural class+base letter, L2 diacritic, L3 case), foldLetter + foldExpansion (ligature) tables, natural-numeric length-prefixed digit runs, compareAlloc; all unit tests
 	src/lib.zig = C FFI adapter: collation_mf_* export fns (open/close/strcoll8/get_sort_key/strcoll/strxfrm/version) over the Zig core
 	test = ./test — master runner: nix-built binary + Zig unit tests + all tests/integration/*.sh; exit code = failure count
 	tests = Test suites (integration; Zig unit tests live inline in src/)
@@ -36,4 +36,5 @@ annotate=[
 	tests/integration/field_sort.sh = Field/separator sorting: -t/--field-separator, -k/--key, COLLATE_FIELD_SEP precedence, missing fields
 	tests/integration/house_style.sh = End-to-end house-style ordering assertions (structural-first, natural numeric, case/diacritic tie-breaks)
 	tests/integration/i18n.sh = i18n prepare-phase: --lang/COLLATION_MF_LANG/LC_* precedence, English fallback, --hilfe/--sprache aliases
+	tests/integration/latin_coverage.sh = Latin coverage as a classifier over sets: sensitivity (whole declared per-language char set must be letter-class) + specificity corpus (out-of-scope must stay CLASS_OTHER); ligature/Romanian/Catalan orderings
 ]
