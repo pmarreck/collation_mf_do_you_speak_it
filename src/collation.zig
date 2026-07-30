@@ -243,17 +243,57 @@ fn pushLetterPrimary(l1: *L1, alloc: std.mem.Allocator, base: u8) !void {
     try l1.append(alloc, WEIGHT_BASE + (base - 'a')); // 'a'->0x02 .. 'z'->0x1B
 }
 
+/// Longest significant-digit count expressible in the single-byte short-form
+/// length. WEIGHT_BASE + 250 = 0xFC, which leaves 0xFD/0xFE reserved and 0xFF
+/// free as the escalation sigil.
+const NUM_SHORT_MAX: usize = 250;
+/// Escalation sigil. Sits ABOVE every short-form length byte, which is exactly
+/// the ordering we need: more significant digits always means a bigger number.
+const NUM_ESCALATE: u8 = 0xFF;
+/// Radix for the long-form length payload. 254 values (0..253) survive the
+/// +WEIGHT_BASE offset inside one byte, keeping every key byte >= 0x02.
+const NUM_RADIX: usize = 254;
+
 /// Append the primary bytes for one ASCII digit run, length-prefixed with the
 /// count of significant digits so bytewise comparison matches numeric value
 /// (the natural-sort technique: fewer significant digits => smaller number).
+///
+/// The length prefix is itself variable-length, which is what makes numeric
+/// collation ARBITRARY-PRECISION — there is no cap on how many digits a run may
+/// carry. Technique borrowed from BLIP (Peter Marreck's "Byte Length Integer
+/// Prefix"): put an escalating magnitude class in the header and the payload
+/// after it, so plain memcmp reproduces numeric order. BLIP's own encoding
+/// cannot be used verbatim here because its payload bytes freely contain 0x00
+/// and 0x01 — our TERM and SEP — so this is a byte-range-restricted variant:
+/// every emitted byte is >= 0x02, and the sigil is harvested from the TOP of the
+/// range (0xFF) because ordering wants it above all content, not in the middle.
 fn pushNumericPrimary(l1: *L1, alloc: std.mem.Allocator, run: []const u8) !void {
     var start: usize = 0;
     while (start < run.len and run[start] == '0') start += 1;
     const sig = run[start..]; // significant digits, no leading zeros (may be empty => value 0)
-    const capped: usize = if (sig.len > 250) 250 else sig.len;
     try l1.append(alloc, CLASS_DIGIT);
-    try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(capped)));
-    for (sig[0..capped]) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
+    if (sig.len <= NUM_SHORT_MAX) {
+        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(sig.len)));
+    } else {
+        // Long form: NUM_ESCALATE, then how many base-254 digits the length
+        // needs, then the length itself big-endian. Ordering holds at each step:
+        // the sigil beats every short form; a longer length-of-length beats a
+        // shorter one; and equal-width lengths compare big-endian == numerically.
+        var tmp: [8]u8 = undefined; // 254^8 digits exceeds any physical input
+        var n = sig.len;
+        var k: usize = 0;
+        while (n > 0) : (k += 1) {
+            tmp[k] = @intCast(n % NUM_RADIX);
+            n /= NUM_RADIX;
+        }
+        try l1.append(alloc, NUM_ESCALATE);
+        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(k)));
+        while (k > 0) {
+            k -= 1;
+            try l1.append(alloc, WEIGHT_BASE + tmp[k]);
+        }
+    }
+    for (sig) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
 }
 
 /// Append the primary bytes for an OTHER (unknown) code point: a class byte
@@ -472,6 +512,91 @@ test "house: NFC precomposed accents fold to a base letter" {
     // Precomposed é (U+00E9) sorts as base 'e' — right after 'e', before 'f'.
     try expectOrder(h, "é", "f");
     try expectOrder(h, "d", "é");
+}
+
+// ── Phase 5: unbounded numeric runs (arbitrary-precision collation) ──
+
+/// Build an allocated decimal string: `lead` followed by `n` copies of `fill`.
+fn numStr(alloc: std.mem.Allocator, lead: u8, n: usize, fill: u8) ![]u8 {
+    const s = try alloc.alloc(u8, n + 1);
+    s[0] = lead;
+    @memset(s[1..], fill);
+    return s;
+}
+
+test "numeric: digits past the 250-digit cap are NOT lost" {
+    const h: u32 = 0;
+    const a = try numStr(testing.allocator, '1', 250, '0');
+    defer testing.allocator.free(a);
+    const b = try numStr(testing.allocator, '1', 250, '0');
+    defer testing.allocator.free(b);
+    // Same 251-digit number except for the FINAL digit — i.e. digit 251, just
+    // past the old cap. These previously produced byte-identical keys and
+    // compared EQUAL, silently collapsing two distinct numbers.
+    a[250] = '5';
+    b[250] = '7';
+    try expectOrder(h, a, b);
+}
+
+test "numeric: more significant digits always means a larger number" {
+    const h: u32 = 0;
+    // Sweep across the escalation boundary (250) and across the base-254
+    // length-of-length boundaries (253/254 and 507/508), where a naive
+    // long-form encoding is most likely to invert.
+    for ([_]usize{ 1, 17, 249, 250, 251, 252, 253, 254, 255, 506, 507, 508, 509, 1000 }) |n| {
+        // "9" x n  <  "1" x (n+1) — smaller leading digits, but one more digit.
+        const small = try numStr(testing.allocator, '9', n - 1, '9');
+        defer testing.allocator.free(small);
+        const big = try numStr(testing.allocator, '1', n, '1');
+        defer testing.allocator.free(big);
+        try testing.expectEqual(@as(usize, n), small.len);
+        try testing.expectEqual(@as(usize, n + 1), big.len);
+        expectOrder(h, small, big) catch |e| {
+            std.debug.print("digit-count monotonicity broke at n={d}\n", .{n});
+            return e;
+        };
+    }
+}
+
+test "numeric: metamorphic — appending a digit always increases the value" {
+    // Oracle-free: no reference implementation, just an invariant of decimal
+    // notation that must hold at EVERY length, including past the old cap.
+    const h: u32 = 0;
+    var seed = std.Random.DefaultPrng.init(0x0DDBA11);
+    const rng = seed.random();
+    for ([_]usize{ 5, 249, 250, 251, 300, 600 }) |n| {
+        const s = try testing.allocator.alloc(u8, n + 1);
+        defer testing.allocator.free(s);
+        s[0] = '1' + rng.uintLessThan(u8, 9); // no leading zero
+        for (s[1..n]) |*c| c.* = '0' + rng.uintLessThan(u8, 10);
+        for ("0123456789") |d| {
+            s[n] = d;
+            expectOrder(h, s[0..n], s[0 .. n + 1]) catch |e| {
+                std.debug.print("append-digit broke at n={d} d={c}\n", .{ n, d });
+                return e;
+            };
+        }
+    }
+}
+
+test "numeric: equal-length long numbers compare digit-by-digit" {
+    const h: u32 = 0;
+    const a = try numStr(testing.allocator, '4', 599, '0');
+    defer testing.allocator.free(a);
+    const b = try numStr(testing.allocator, '4', 599, '0');
+    defer testing.allocator.free(b);
+    a[400] = '3'; // differ deep past the cap, same length
+    b[400] = '8';
+    try expectOrder(h, a, b);
+}
+
+test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
+    const s = try numStr(testing.allocator, '7', 900, '3');
+    defer testing.allocator.free(s);
+    const key = try sortKeyAlloc(testing.allocator, 0, s);
+    defer testing.allocator.free(key);
+    try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
+    for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
 }
 
 // ── Phase 4: ligature expansions + broadened Latin coverage ──
