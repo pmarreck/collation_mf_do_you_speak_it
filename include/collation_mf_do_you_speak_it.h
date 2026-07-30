@@ -53,6 +53,21 @@ extern "C" {
  * "peter-3" and "v1.9" keep separator semantics either way. */
 #define COLLATION_MF_DECIMAL        (1u << 3)
 
+/* With COLLATION_MF_DECIMAL, ',' is the decimal separator and '.' groups digits
+ * (continental convention) rather than the reverse. Ignored without DECIMAL.
+ *
+ * This is a DECLARATION by the caller, never an inference from the data: `1.234`
+ * is genuinely ambiguous between 1234 and 1.234, and nothing in the bytes
+ * resolves it. Inferring would make sort order depend on data content — the one
+ * thing this library exists to prevent.
+ *
+ * Under DECIMAL, a digit-group separator (space, NBSP, thin space, apostrophe,
+ * underscore, and whichever of ','/'.' is not the decimal mark) is absorbed into
+ * the number whenever it sits BETWEEN two digits. Absorption is group-SIZE
+ * agnostic, so Indian 2-2-3 (12,34,567) and Chinese 4-grouping (1,2345,6789)
+ * both work. */
+#define COLLATION_MF_DECIMAL_COMMA  (1u << 4)
+
 /* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
 
 #define COLLATION_MF_LESS     (-1)

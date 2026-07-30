@@ -66,7 +66,25 @@ maintained_by: agent
       technique, the BLIP derivation, advantages, and all 10 caveats.
       (2026-07-29 23:56 EDT)
 
-Current test count: 123 passed, 0 failed (35 Zig unit + 88 CLI integration).
+- [x] **Grouped numbers under `--decimal[=SEP]`.** Peter's insight: if you are
+      sorting numbers, the separator convention does not matter as long as the
+      numbers are merged rather than split — because absorbing separators is
+      multiplication by a constant 10^k, which preserves order. (His "consistent
+      within the list" condition is really about PRECISION, and even that is
+      handled, since the fraction compares left-aligned — left-alignment IS the
+      padding.) `-d` / `--decimal=,` declares the decimal mark; every other
+      candidate (space, NBSP, thin space, apostrophe, underscore, and the other
+      of ','/'.') is absorbed whenever it sits BETWEEN two digits. Absorption is
+      group-SIZE agnostic per Peter's point 1, so Indian 2-2-3 and Chinese
+      4-grouping both work; "between two digits" also keeps "Smith 1 000" and
+      "abc, 5" intact. Payoff: English/German/Swiss/SI spellings of the same
+      values all sort identically, so the localization ambiguity stops mattering.
+      SCOPE CHANGE: decimals now apply to EVERY number, not just a leading one
+      (required by "thing1 000" > "thing999"); the sign rule is unchanged at
+      offset 0. Consequence, documented: do not pass `--decimal` version strings.
+      7 new unit tests + 19 CLI tests. (2026-07-30 10:45 EDT)
+
+Current test count: 148 passed, 0 failed (42 Zig unit + 106 CLI integration).
 
 ## Open follow-ups
 

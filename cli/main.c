@@ -84,9 +84,15 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  -t, --field-separator <SEP>  Split each line on SEP (default: whole line)\n"
         "  -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line\n"
         "  -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)\n"
-        "  -d, --decimal                Read a leading number's first '.' as a\n"
-        "                               decimal point (1.10 < 1.9). Default treats\n"
-        "                               every '.' as a separator (1.9 < 1.10).\n"
+        "  -d, --decimal[=SEP]          Declare the input contains DECIMAL numbers.\n"
+        "                               SEP is the decimal mark, '.' (default) or\n"
+        "                               ','. Digit-group separators (space, NBSP,\n"
+        "                               thin space, ' _ and the other of . ,) are\n"
+        "                               then absorbed between digits, so\n"
+        "                               999,999.00 < 1,000,000.00 and the same\n"
+        "                               values order alike in any convention.\n"
+        "                               Default: every '.' is a separator, giving\n"
+        "                               version order (1.9 < 1.10).\n"
         "      --version-sort           Explicit form of the default dot handling\n"
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
@@ -118,9 +124,13 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  -t, --field-separator <SEP>  Zeile an SEP trennen (Standard: ganze Zeile)\n"
         "  -k, --key <N>                Nach dem N-ten Feld sortieren; gleich -> ganze Zeile\n"
         "  -c, --code-point             Reine UTF-8-Byte-Reihenfolge (== LC_ALL=C sort)\n"
-        "  -d, --decimal                Erstes '.' einer führenden Zahl als Dezimal-\n"
-        "                               trennzeichen lesen (1.10 < 1.9). Standard:\n"
-        "                               jedes '.' ist ein Trenner (1.9 < 1.10).\n"
+        "  -d, --decimal[=TRZ]          Eingabe enthält DEZIMALZAHLEN. TRZ ist das\n"
+        "                               Dezimaltrennzeichen, '.' (Standard) oder ','.\n"
+        "                               Tausendertrennzeichen (Leerzeichen, NBSP,\n"
+        "                               schmales Leerzeichen, ' _ und das jeweils\n"
+        "                               andere von . ,) werden dann zwischen Ziffern\n"
+        "                               absorbiert. Standard: jedes '.' ist ein\n"
+        "                               Trenner (1.9 < 1.10).\n"
         "      --version-sort           Ausdrückliche Form des Standardverhaltens\n"
         "  -h, --help / --hilfe         Diese Hilfe anzeigen\n"
         "      --about                  Version + Plattform in einer Zeile\n"
@@ -448,6 +458,23 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(a, "-d") == 0 || strcmp(a, "--decimal") == 0
                        || strcmp(a, "--decimals") == 0) {
                 options |= COLLATION_MF_DECIMAL;
+                options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+            } else if (strncmp(a, "--decimal=", 10) == 0
+                       || strncmp(a, "--decimals=", 11) == 0) {
+                /* Attached form only: a detached value would be ambiguous with
+                 * the positional FILE argument. */
+                const char *sep = strchr(a, '=') + 1;
+                if (strcmp(sep, ".") == 0) {
+                    options |= COLLATION_MF_DECIMAL;
+                    options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                } else if (strcmp(sep, ",") == 0) {
+                    options |= COLLATION_MF_DECIMAL | COLLATION_MF_DECIMAL_COMMA;
+                } else {
+                    fprintf(stderr,
+                            "collate: --decimal separator must be '.' or ',' "
+                            "(got \"%s\")\n", sep);
+                    return 2;
+                }
             } else if (strcmp(a, "--version-sort") == 0) {
                 /* The explicit form of the default. Present so a later argument
                  * can override an earlier --decimal, per the CLI convention. */

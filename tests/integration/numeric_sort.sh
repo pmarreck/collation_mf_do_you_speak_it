@@ -116,9 +116,62 @@ echo "── dots: versions by default, decimals on request ──"
 assert_order "default = version order"          -- 1.2 1.9 1.10
 assert_order "default, prefixed"                -- v1.9 v1.10
 assert_order "--decimal = real number order" -d -- 1.10 1.2 1.9
-assert_order "--decimal, offset 0 only"      -d -- v1.9 v1.10
+assert_order "--decimal reads embedded too"  -d -- v1.10 v1.9
 assert_order "--decimal negative fractions"  -d -- -2 -1.5 -1.4 -1
 assert_order "-d then --version-sort wins"   -d --version-sort -- 1.9 1.10
+
+echo "── grouped numbers: OFF by default ──"
+assert_order "default splits on separators"  -- 1,000,000.00 999,999.00
+assert_order "default: space splits too"     -- "thing1 000" thing999
+
+echo "── grouped numbers: --decimal absorbs separators between digits ──"
+assert_order "comma grouping"             -d -- 1,000.00 10,000.00 10,000.01 100,000.00 999,999.00 1,000,000.00
+assert_order "space grouping (SI form)"   -d -- "1 000.00" "10 000.00" "999 999.00" "1 000 000.00"
+assert_order "apostrophe (Swiss)"         -d -- "1'000.00" "999'999.00" "1'000'000.00"
+assert_order "underscore (programmer)"    -d -- 1_000 999_999 1_000_000
+assert_order "embedded run"               -d -- thing999 "thing1 000"
+assert_order "varied precision"           -d -- 1.25 1.5 1.75
+
+echo "── grouped numbers: --decimal=, swaps the roles ──"
+assert_order "continental convention" --decimal=, -- 1.000,00 10.000,00 10.000,01 100.000,00 999.999,00 1.000.000,00
+assert_order "varied precision, comma" --decimal=, -- 1,25 1,5 1,75
+assert_order "--decimals= alias works"  --decimals=, -- 1.000,00 999.999,00
+
+echo "── grouped numbers: group-SIZE agnostic (no 3-digit assumption) ──"
+# Chosen so the first group's order disagrees with true magnitude.
+assert_order "Indian 2-2-3"  -d -- 99,999.00 1,00,000.00 12,34,567.89
+assert_order "Chinese 4-group" -d -- 9999,9999 1,0000,0000
+
+echo "── grouped numbers: a separator not between digits is left alone ──"
+assert_order "name then number" -d -- "Smith 999" "Smith 1 000"
+assert_order "comma-space"      -d -- "abc, 5" "abc, 10"
+
+echo "── the payoff: same VALUES, same order, any convention ──"
+en=$(printf '1,000.00\n999,999.00\n1,000,000.00\n10,000.01\n' | "$CLI" -d | sed 's/[,]//g')
+de=$(printf '1.000,00\n999.999,00\n1.000.000,00\n10.000,01\n' | "$CLI" --decimal=, | sed 's/[.]//g;s/,/./')
+ch=$(printf "1'000.00\n999'999.00\n1'000'000.00\n10'000.01\n" | "$CLI" -d | sed "s/'//g")
+if [[ "$en" == "$ch" ]]; then
+	pass "English and Swiss forms produce the same value order"
+else
+	fail "English vs Swiss order differs"$'\n'"    en: $en"$'\n'"    ch: $ch"
+fi
+# Compare position-by-position rather than textually for the German form.
+en_pos=$(printf '1,000.00\n999,999.00\n1,000,000.00\n10,000.01\n' | "$CLI" -d | grep -n . | cut -d: -f1,2 | sed 's/[,.]//g')
+de_pos=$(printf '1.000,00\n999.999,00\n1.000.000,00\n10.000,01\n' | "$CLI" --decimal=, | grep -n . | cut -d: -f1,2 | sed 's/[,.]//g')
+if [[ "$en_pos" == "$de_pos" ]]; then
+	pass "English and German forms produce the same value order"
+else
+	fail "English vs German order differs"$'\n'"    en: $en_pos"$'\n'"    de: $de_pos"
+fi
+
+echo "── grouped numbers: separator validation ──"
+if err=$("$CLI" --decimal=X </dev/null 2>&1); then
+	fail "--decimal=X should have been rejected"
+else
+	[[ "$err" == *"must be '.' or ','"* ]] \
+		&& pass "--decimal=X rejected with a clear message" \
+		|| fail "--decimal=X rejected but message was: $err"
+fi
 
 echo "── negative control: what sort -g gets wrong ──"
 # 25 nines vs 1e25 both collapse to the same long double, so -g ties and falls

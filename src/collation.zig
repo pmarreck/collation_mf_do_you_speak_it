@@ -31,6 +31,16 @@ pub const OPT_CASE_SENSITIVE: u32 = 1 << 2; // reserved
 /// satisfies both — which is exactly why coreutils ships `-n`, `-V`, and `-g`
 /// as separate flags rather than unifying them.
 pub const OPT_DECIMAL: u32 = 1 << 3;
+/// With OPT_DECIMAL, use ',' as the decimal separator and '.' as a grouping
+/// separator (continental convention) instead of the other way round. Ignored
+/// unless OPT_DECIMAL is set.
+///
+/// This is a DECLARATION by the caller, not an inference from the data: `1.234`
+/// is genuinely ambiguous between one-thousand-two-hundred-thirty-four and
+/// one-point-two-three-four, and nothing in the bytes resolves it. Inferring it
+/// would make sort order depend on data content, which is the one thing this
+/// library exists to prevent.
+pub const OPT_DECIMAL_COMMA: u32 = 1 << 4;
 
 // ─── Sort-key structural bytes ───────────────────────────────────────────
 const TERM: u8 = 0x00; // whole-key terminator (< everything)
@@ -305,6 +315,138 @@ fn pushNumLength(l1: *L1, alloc: std.mem.Allocator, n: usize, invert: bool) !voi
     }
 }
 
+/// Byte length of a digit-group separator at `s[i]`, or 0 if there is none.
+///
+/// Deliberately group-SIZE agnostic: absorption keys only on "sits between two
+/// digits", never on a 3-digit rhythm, because Indian lakh/crore groups 2-2-3
+/// (`12,34,567`) and Chinese groups by 4 (`1,2345,6789`). Covers ASCII space,
+/// apostrophe (Swiss `1'000`), underscore (programmer `1_000`), whichever of
+/// ','/'.' is NOT the decimal separator, and the Unicode spaces the SI/ISO 80000
+/// grouping convention actually recommends.
+fn groupSepLen(s: []const u8, i: usize, comma_decimal: bool) usize {
+    switch (s[i]) {
+        ' ', '\'', '_' => return 1,
+        ',' => return if (comma_decimal) 0 else 1,
+        '.' => return if (comma_decimal) 1 else 0,
+        0xC2 => { // NBSP U+00A0
+            if (i + 1 < s.len and s[i + 1] == 0xA0) return 2;
+        },
+        0xE2 => { // thin space U+2009, narrow NBSP U+202F
+            if (i + 2 < s.len and s[i + 1] == 0x80 and (s[i + 2] == 0x89 or s[i + 2] == 0xAF)) return 3;
+        },
+        else => {},
+    }
+    return 0;
+}
+
+/// A number scanned in OPT_DECIMAL mode. `int` spans the integer digits TOGETHER
+/// WITH any absorbed separators (so it is one contiguous slice of the input, no
+/// copying); `frac` spans only the fractional digits.
+const GroupedRun = struct {
+    int_start: usize,
+    int_end: usize,
+    frac_start: usize,
+    frac_end: usize,
+    end: usize,
+};
+
+fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool) GroupedRun {
+    var i = start;
+    while (i < s.len) {
+        if (s[i] >= '0' and s[i] <= '9') {
+            i += 1;
+            continue;
+        }
+        const sl = groupSepLen(s, i, comma_decimal);
+        // Absorb ONLY when a digit follows, i.e. the separator sits BETWEEN two
+        // digits. That is what keeps "Smith 1 000" from swallowing the space
+        // after the name, and "abc, 5" from swallowing the comma.
+        if (sl == 0 or i + sl >= s.len or s[i + sl] < '0' or s[i + sl] > '9') break;
+        i += sl;
+    }
+    const int_end = i;
+
+    var fs = i;
+    var fe = i;
+    const dec: u8 = if (comma_decimal) ',' else '.';
+    if (i + 1 < s.len and s[i] == dec and s[i + 1] >= '0' and s[i + 1] <= '9') {
+        i += 1;
+        fs = i;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        fe = i;
+        // Trailing zeros carry no value: 1.50 == 1.5, 1.00 == 1.
+        while (fe > fs and s[fe - 1] == '0') fe -= 1;
+    }
+    return .{ .int_start = start, .int_end = int_end, .frac_start = fs, .frac_end = fe, .end = i };
+}
+
+/// Count significant digits, skipping absorbed separators and leading zeros.
+fn countSigDigits(s: []const u8) usize {
+    var n: usize = 0;
+    var started = false;
+    for (s) |c| {
+        if (c < '0' or c > '9') continue;
+        if (!started) {
+            if (c == '0') continue;
+            started = true;
+        }
+        n += 1;
+    }
+    return n;
+}
+
+fn emitSigDigits(l1: *L1, alloc: std.mem.Allocator, s: []const u8, invert: bool) !void {
+    var started = false;
+    for (s) |c| {
+        if (c < '0' or c > '9') continue;
+        if (!started) {
+            if (c == '0') continue;
+            started = true;
+        }
+        const d = c - '0';
+        try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d else WEIGHT_BASE + d);
+    }
+}
+
+/// Fractional digits are emitted VERBATIM — no leading-zero stripping (0.05 is
+/// not 0.5) and no length prefix. Comparing them left-aligned is what makes
+/// varied precision work without padding: "5" vs "25" compares 5 against 2, so
+/// 1.25 < 1.5 even though 1.25 has more digits.
+fn emitFracDigits(l1: *L1, alloc: std.mem.Allocator, s: []const u8, invert: bool) !void {
+    for (s) |c| {
+        const d = c - '0';
+        try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d else WEIGHT_BASE + d);
+    }
+}
+
+fn pushGroupedNumber(
+    l1: *L1,
+    l2: *L1,
+    l3: *L1,
+    alloc: std.mem.Allocator,
+    s: []const u8,
+    run: GroupedRun,
+    neg: bool,
+) !void {
+    const int_slice = s[run.int_start..run.int_end];
+    const frac_slice = s[run.frac_start..run.frac_end];
+    const n = countSigDigits(int_slice);
+    if (neg) {
+        try l1.append(alloc, CLASS_NEG);
+        try pushNumLength(l1, alloc, n, true);
+        try emitSigDigits(l1, alloc, int_slice, true);
+        try emitFracDigits(l1, alloc, frac_slice, true);
+        try l1.append(alloc, NEG_END);
+    } else {
+        try l1.append(alloc, CLASS_DIGIT);
+        try pushNumLength(l1, alloc, n, false);
+        try emitSigDigits(l1, alloc, int_slice, false);
+        try emitFracDigits(l1, alloc, frac_slice, false);
+    }
+    try l2.append(alloc, WEIGHT_BASE + D_NONE);
+    try l3.append(alloc, CASE_NEUTRAL);
+}
+
 /// A signed and/or fractional number found at the START of the collated string.
 const LeadingNum = struct {
     neg: bool,
@@ -456,13 +598,33 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
     // Anywhere else, '-' and '.' are separators, so "peter-3" < "peter-4" and
     // "2026-07-29" keep working. Returns null for a plain unsigned integer, which
     // falls through to the ordinary scanner below and keeps those keys unchanged.
-    if (parseLeadingNumber(s, options & OPT_DECIMAL != 0)) |ln| {
-        try pushSignedDecimal(&l1, &l2, &l3, alloc, ln);
-        i = ln.end;
+    const decimal = options & OPT_DECIMAL != 0;
+    const comma_dec = options & OPT_DECIMAL_COMMA != 0;
+
+    // In decimal mode the grouped scanner owns ALL number scanning (below), so
+    // only the plain house-style path consults parseLeadingNumber here.
+    if (!decimal) {
+        if (parseLeadingNumber(s, false)) |ln| {
+            try pushSignedDecimal(&l1, &l2, &l3, alloc, ln);
+            i = ln.end;
+        }
     }
 
     while (i < s.len) {
         const b = s[i];
+
+        // Decimal mode: numbers may absorb digit-group separators, and apply to
+        // EVERY run, not just a leading one ("thing1 000" must beat "thing999").
+        // A sign is still only honored at offset 0.
+        if (decimal) {
+            const neg = i == 0 and b == '-' and s.len > 1 and s[1] >= '0' and s[1] <= '9';
+            if (neg or (b >= '0' and b <= '9')) {
+                const run = scanGroupedNumber(s, if (neg) i + 1 else i, comma_dec);
+                try pushGroupedNumber(&l1, &l2, &l3, alloc, s, run, neg);
+                i = run.end;
+                continue;
+            }
+        }
 
         // Natural numeric run (default-on in house style).
         if (b >= '0' and b <= '9') {
@@ -731,6 +893,77 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
 }
 
+// ── Phase 7: grouped numbers — absorb digit-group separators under OPT_DECIMAL ──
+
+test "grouped: OFF by default — separators still split numbers" {
+    const h: u32 = 0;
+    // Without OPT_DECIMAL a space is an ordinary separator, so "thing1 000" is
+    // "thing", 1, space, 0 — and 1 < 999. This is the DEFAULT and must not drift.
+    try expectOrder(h, "thing1 000", "thing999");
+    try expectOrder(h, "1,000,000.00", "999,999.00");
+}
+
+test "grouped: OPT_DECIMAL absorbs separators sitting BETWEEN digits" {
+    const d = OPT_DECIMAL;
+    // The counterexample that broke the naive split approach.
+    try expectOrder(d, "999,999.00", "1,000,000.00");
+    try expectOrder(d, "1,000.00", "999,999.00");
+    // Spaces too — this is the SI/ISO-recommended grouping form.
+    try expectOrder(d, "thing999", "thing1 000");
+    try expectOrder(d, "1 000.00", "10 000.00");
+    // Apostrophe (Swiss) and underscore (programmer) groupings.
+    try expectOrder(d, "999'999.00", "1'000'000.00");
+    try expectOrder(d, "999_999", "1_000_000");
+}
+
+test "grouped: absorption is group-size AGNOSTIC (Indian, Chinese)" {
+    const d = OPT_DECIMAL;
+    // Indian lakh/crore groups 2,2,3 and Chinese groups by 4. A rule keyed to
+    // 3-digit groups would mis-parse both, so absorption keys only on
+    // digit-separator-digit.
+    // Chosen so the FIRST group's order DISAGREES with true magnitude — with
+    // 99 vs 1 leading, a naive per-group comparison inverts these.
+    try expectOrder(d, "99,999.00", "1,00,000.00"); // 99999 < 100000 (Indian)
+    try expectOrder(d, "9999,9999", "1,0000,0000"); // 99999999 < 100000000 (4-group)
+    try expectOrder(d, "9,99,999.00", "12,34,567.89"); // 999999 < 1234567
+}
+
+test "grouped: a separator NOT between two digits is left alone" {
+    const d = OPT_DECIMAL;
+    // "Smith 1 000" — the space after 'h' is not digit-sep-digit, so the name
+    // and the number stay distinct elements.
+    try expectOrder(d, "Smith 999", "Smith 1 000");
+    try expectOrder(d, "abc, 5", "abc, 10"); // ", " is not between digits
+}
+
+test "grouped: OPT_DECIMAL_COMMA swaps the roles of ',' and '.'" {
+    const dc = OPT_DECIMAL | OPT_DECIMAL_COMMA;
+    // German/continental: '.' groups, ',' is the decimal point.
+    try expectOrder(dc, "1.000,00", "10.000,00");
+    try expectOrder(dc, "10.000,00", "10.000,01");
+    try expectOrder(dc, "999.999,00", "1.000.000,00");
+    try expectOrder(dc, "1,25", "1,5"); // varied precision, left-aligned fraction
+}
+
+test "grouped: the same VALUES order identically across conventions" {
+    // The payoff — the localization nightmare evaporates. Each list denotes the
+    // same four values; each must come out in the same relative order.
+    const en = OPT_DECIMAL;
+    const de = OPT_DECIMAL | OPT_DECIMAL_COMMA;
+    try expectOrder(en, "1,000.00", "999,999.00");
+    try expectOrder(de, "1.000,00", "999.999,00");
+    try expectOrder(en, "999,999.00", "1,000,000.00");
+    try expectOrder(de, "999.999,00", "1.000.000,00");
+}
+
+test "grouped: varied precision needs no padding (left-aligned fraction)" {
+    const d = OPT_DECIMAL;
+    try expectOrder(d, "1.25", "1.5"); // 1.25 < 1.5 despite MORE digits
+    try expectOrder(d, "1.5", "1.75");
+    try expectOrder(d, "10.5", "10.55");
+    try expectOrder(d, "1,000.5", "1,000.75");
+}
+
 // ── Phase 6: signed / decimal numbers, but ONLY at offset 0 ──
 
 test "signed: a leading '-' before digits is a MINUS SIGN" {
@@ -789,12 +1022,19 @@ test "decimal: OPT_DECIMAL makes a leading number's first '.' a decimal point" {
     try expectOrder(d, "2.5", "10.5"); // integer part still natural-numeric
 }
 
-test "decimal: OPT_DECIMAL only applies at offset 0 — 'v1.9' stays a version" {
+test "decimal: OPT_DECIMAL applies to EMBEDDED numbers, not just leading ones" {
     const d = OPT_DECIMAL;
-    // The switch changes the reading of a LEADING number only; a dotted number
-    // that does not start the string is still separator-delimited.
-    try expectOrder(d, "v1.9", "v1.10");
-    try expectOrder(d, "file1.9.txt", "file1.10.txt");
+    // Scope widened deliberately in phase 7: grouped numbers have to work on
+    // embedded runs ("thing1 000" must beat "thing999"), so a dotted number
+    // anywhere in the string is read as a decimal once the caller has DECLARED
+    // decimal input. Consequence: version strings must not be fed --decimal.
+    try expectOrder(d, "v1.10", "v1.9"); // read as 1.1 < 1.9
+    try expectOrder(d, "file1.10.txt", "file1.9.txt");
+    // The DEFAULT still gives version semantics, which is why it is the default.
+    try expectOrder(0, "v1.9", "v1.10");
+    try expectOrder(0, "file1.9.txt", "file1.10.txt");
+    // The SIGN remains offset-0 only — that scope did NOT widen.
+    try expectOrder(d, "peter-3", "peter-4");
 }
 
 test "decimal: OPT_DECIMAL inverts negative fractions too" {
@@ -941,11 +1181,11 @@ test "invariant: sort-key order equals compare order (house + code-point)" {
     // and invalid UTF-8 sequences too. The ligatures and Romanian letters are
     // present because expansions are the one construct that emits a DIFFERENT
     // number of elements per level, i.e. the likeliest way to break invariant #3.
-    const alphabet = "abcABC 12.é�zñ-_ßœæĳășțŀ";
+    const alphabet = "abcABC 12.,'é�zñ-_ßœæĳășțŀ";
     var a_buf: [16]u8 = undefined;
     var b_buf: [16]u8 = undefined;
 
-    for ([_]u32{ 0, OPT_CODE_POINT, OPT_DECIMAL }) |opts| {
+    for ([_]u32{ 0, OPT_CODE_POINT, OPT_DECIMAL, OPT_DECIMAL | OPT_DECIMAL_COMMA }) |opts| {
         var trial: usize = 0;
         while (trial < 2000) : (trial += 1) {
             const alen = rng.intRangeAtMost(usize, 0, a_buf.len);

@@ -32,9 +32,13 @@ In priority order:
    order correctly. A leading `-` before digits is a **minus sign**
    (`-10 < -5 < 0`), but a `-` anywhere else stays a separator, so
    `peter-3 < peter-4` and ISO dates are unharmed. Dots are separators by default
-   (`1.9 < 1.10`, version semantics); `-d`/`--decimal` reads a leading number's
-   first dot as a decimal point (`1.10 < 1.9`). Full detail and the complete list
-   of caveats: **[docs/NUMERIC.md](docs/NUMERIC.md)**.
+   (`1.9 < 1.10`, version semantics); `-d`/`--decimal[=SEP]` declares decimal
+   input, which absorbs digit-group separators between digits — so
+   `999,999.00 < 1,000,000.00`, and **the same values sort into the same order
+   whether written `1,000.00`, `1.000,00`, `1'000.00`, or `1 000.00`**.
+   Absorption is group-size agnostic, so Indian 2-2-3 and Chinese 4-grouping work.
+   Full detail and the complete list of caveats:
+   **[docs/NUMERIC.md](docs/NUMERIC.md)**.
 3. **Case-insensitive base letters.** `apple` and `Apple` are adjacent, not
    split into "all-uppercase-then-all-lowercase".
 4. **Diacritics as a secondary tie-break.** `café` sorts near `cafe`
@@ -66,8 +70,9 @@ collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
   -t, --field-separator <SEP>  Split each line on SEP (default: whole line)
   -k, --key <N>                Sort by the 1-based Nth field; ties -> whole line
   -c, --code-point             Pure UTF-8 byte order (== LC_ALL=C sort)
-  -d, --decimal                Leading number's first '.' is a decimal point
-                               (1.10 < 1.9); default treats '.' as a separator
+  -d, --decimal[=SEP]          Declare DECIMAL input; SEP is the decimal mark,
+                               '.' (default) or ','. Digit-group separators are
+                               then absorbed (999,999.00 < 1,000,000.00)
       --version-sort           Explicit form of the default dot handling
   -h, --help                   Show help
       --about                  One-line version + platform

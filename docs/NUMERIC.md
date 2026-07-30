@@ -121,6 +121,70 @@ There is no order that satisfies both, which is precisely why coreutils ships
 `--decimal` applies **only at offset 0**, so `v1.9 < v1.10` regardless of the
 flag, and a second dot in the same number is always a separator.
 
+## Grouped numbers (`--decimal`) — and why the localization nightmare evaporates
+
+`1.234` is irreducibly ambiguous: one thousand two hundred thirty-four in Berlin,
+one point two three four in Boston. Nothing in the bytes resolves it, and the
+standards bodies gave up trying — SI/ISO 80000-1 permits **either** mark as the
+decimal separator and rules that grouping must use a thin space precisely to end
+the ambiguity.
+
+So `--decimal` is a **declaration by the caller**, never an inference from the
+data. Inferring would make sort order depend on data content, which is the one
+thing this library exists to prevent.
+
+```sh
+collate -d              # '.' is the decimal mark, everything else groups
+collate --decimal=,     # ',' is the decimal mark  (continental)
+```
+
+Under `--decimal`, a digit-group separator is **absorbed into the number whenever
+it sits between two digits**. Separators are ASCII space, apostrophe (`1'000`,
+Swiss), underscore (`1_000`, programmer), whichever of `,`/`.` is *not* the
+decimal mark, and the Unicode spaces SI actually recommends (NBSP U+00A0, thin
+space U+2009, narrow NBSP U+202F).
+
+**Absorption is deliberately group-SIZE agnostic.** A 3-digit rule would break
+Indian lakh/crore grouping (2-2-3: `12,34,567`) and Chinese 4-grouping
+(`1,2345,6789`), both of which work here. The "between two digits" rule is also
+what stops `"Smith 1 000"` from swallowing the space after the name, and
+`"abc, 5"` from swallowing the comma.
+
+### Why this works — the actual theorem
+
+Absorbing separators is equivalent to multiplying every value by 10ᵏ, where k is
+its fractional-digit count. Comparison is unaffected by a *constant* positive
+scale factor, so ordering is preserved. And because varied precision is handled
+by comparing the fraction **left-aligned** (no length prefix — see
+`emitFracDigits`), k does not even have to be constant:
+
+```
+1.25 vs 1.5  →  fraction "25" vs "5"  →  2 < 5  →  1.25 < 1.5   ✓
+```
+
+Left-alignment *is* the padding, done implicitly and without a second pass.
+
+The consequence is the nice part: **the same values sort into the same order
+regardless of which convention wrote them**, and a list that mixes conventions
+still works, because `1,000.00` and `1.000,00` both denote 1000 and compare equal.
+
+```
+English   1,000.00   10,000.01   999,999.00   1,000,000.00
+German    1.000,00   10.000,01   999.999,00   1.000.000,00     ← same order
+Swiss     1'000.00   10'000.01   999'999.00   1'000'000.00     ← same order
+SI        1 000.00   10 000.01   999 999.00   1 000 000.00     ← same order
+```
+
+### Scope: `--decimal` applies to EVERY number, the sign only to the first
+
+Grouping has to work on embedded runs — `thing1 000` must beat `thing999` — so
+under `--decimal` a number anywhere in the string is read as a decimal. The
+**sign rule is unchanged**: a `-` is only a sign at offset 0.
+
+The direct consequence: **do not feed `--decimal` a list of version strings.**
+`v1.9` and `v1.10` are read as 1.9 and 1.1 there, so `v1.10 < v1.9`. Without the
+flag you get version order, which is why that is the default.
+
 ## What this buys you
 
 - **Arbitrary-precision numeric ordering of runs embedded in general text**, in
@@ -145,7 +209,9 @@ Every item below is verified behavior, not speculation.
 |---|---|---|
 | 1 | **Leading zeros are invisible**: `007`, `07`, `7` produce identical keys and compare EQUAL | Only *significant* digits are weighted. The library's order is a preorder, not a total order. The CLI breaks such ties on raw line bytes, so output is still deterministic (`007 07 7`), but direct FFI users get whatever their sort does with ties. |
 | 2 | **`-0` sorts before `0`** | `-0` takes the negative class; mathematically they are equal. |
-| 3 | **Thousands separators are not understood**: `1,234 < 999` | `,` is punctuation, so this reads as `1`, `,`, `234`. Locale-dependent (`1,234` vs `1.234`) and therefore out of scope for a locale-free library. |
+| 3 | **Thousands separators are ignored by default**: `1,234 < 999` | Without `--decimal`, `,` is ordinary punctuation, so this reads as `1`, `,`, `234`. Pass `-d` (or `--decimal=,`) to absorb grouping separators; see the section above. The default cannot infer it, because `1.234` is genuinely ambiguous and guessing would make order depend on data content. |
+| 3b | **Under `--decimal`, whitespace between digits is absorbed**: `100 200 300` becomes one number | Genuinely ambiguous — it is indistinguishable from a grouped number. `--decimal` is a declaration that the input *is* numeric, so this is the declared reading. Use `-t`/`-k` to isolate the field if the input is a whitespace-separated list. |
+| 3c | **`--decimal` must not be used on version strings**: `v1.10 < v1.9` | Grouping applies to embedded numbers, so a dotted number anywhere is read as a decimal. The default (no flag) gives version order. |
 | 4 | **A sign is not recognized mid-string**: `x -5` sorts before `x -10` | The offset-0 rule. Use `-t`/`-k` to make the number a field, which *is* offset 0. |
 | 5 | **An explicit `+` is not a sign**: `+5 < -3` | `+` stays punctuation, which ranks below the negative class. Mixing explicit `+` with `-` gives wrong results. |
 | 6 | **Exponent notation is not understood**: `1e10 < 2e5` | `1e10` reads as `1`, `e`, `10`. No scientific-notation parsing. |
