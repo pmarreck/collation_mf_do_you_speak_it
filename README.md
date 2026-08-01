@@ -164,6 +164,28 @@ See [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) and [RULES.md](RULES.md).
 
 ## Limits (v1)
 
+**CJK is not covered — out of scope for now.** Chinese, Japanese, and Korean text
+falls into `CLASS_OTHER` and sorts in **code-point order**: reproducible,
+deterministic, and non-corrupting, but *not* linguistically ordered. This is a
+deliberate boundary, not an oversight. Correct CJK collation needs **dictionaries**,
+not tables:
+
+- **Chinese** sorts by pronunciation (pinyin), which Han characters do not encode.
+  A Han→reading map is ~40k entries, and it still is not enough because of
+  polyphones (行 = *xíng* or *háng*), whose resolution needs word segmentation.
+- **Japanese** sorts by reading (*yomi*), which is genuinely underdetermined —
+  東 is *higashi* alone but *tō* in 東京, and surname readings are ambiguous even
+  to humans. Even ICU punts, ordering kana properly and leaving kanji in a fixed
+  Unihan order.
+- **Korean** is the exception: hangul decomposes algorithmically and its
+  code-point order already *is* dictionary order, so pure-hangul text is correct
+  today by construction.
+
+**The escape hatch, which needs no dictionary in this binary:** supply the reading
+as a separate column and sort on it with `-t`/`-k`. That is what Japanese systems
+actually do — it is why every Japanese form has a furigana field. Given
+`東京<TAB>とうきょう`, `collate -t$'\t' -k2` yields correct Japanese order.
+
 **One tailoring, not many.** The house style is a single global ordering, closest
 to Unicode's DUCET **root** / Western-European default. That makes it *native*
 for the Romance languages — accent-as-secondary is exactly the French, Spanish,

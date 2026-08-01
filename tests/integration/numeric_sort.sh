@@ -227,6 +227,30 @@ else
 	echo "  skip: bc not found" >&2
 fi
 
+echo "── explicit '+' sign ──"
+assert_order "default: '+' is punctuation"    -- +5 5
+assert_order "-d: '+' outranks negatives"  -d -- -3 +5
+assert_order "-s: '+' outranks negatives"  -s -- -10 +2
+assert_order "-n: signed positives order"  -n -- +5 +10
+assert_order "'+' not at offset 0"         -d -- peter+3 peter+4
+
+echo "── leading zeros: a real distinction by default, a tie in numeric modes ──"
+assert_order "default distinguishes"          -- 007 07 7
+assert_order "default, embedded"              -- word007 word7
+assert_order "default, negatives"             -- -007 -7
+assert_order "value still dominates"          -- 007 8
+# In numeric modes they are the same number, so the CLI's raw-byte tie-break
+# decides and the pair must come out in byte order either way it is fed.
+for flag in -d -s; do
+	a=$(printf '007\n7\n' | "$CLI" $flag | tr '\n' ' ')
+	b=$(printf '7\n007\n' | "$CLI" $flag | tr '\n' ' ')
+	if [[ "$a" == "$b" ]]; then
+		pass "$flag: 007 and 7 tie (order independent of input order)"
+	else
+		fail "$flag: 007/7 not a tie — got '$a' vs '$b'"
+	fi
+done
+
 echo "── negative control: what sort -g gets wrong ──"
 # 25 nines vs 1e25 both collapse to the same long double, so -g ties and falls
 # back to byte order, which is inverted here. We must NOT do that.

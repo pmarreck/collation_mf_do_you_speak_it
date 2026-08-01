@@ -100,33 +100,55 @@ maintained_by: agent
       incl. a bc differential over 50 generated scientific values (exponents
       -20..+20). (2026-07-30 14:00 EDT)
 
-Current test count: 175 passed, 0 failed (51 Zig unit + 124 CLI integration).
+- [x] **Explicit `+` sign, and leading zeros as a default distinction** (Peter,
+      2026-07-31). `+` is a sign only under `-d`/`-s`/`-n` and only at offset 0;
+      in the default text sort it stays punctuation. This fixes `+5` sorting
+      BELOW every negative in numeric modes (punctuation ranks under CLASS_NEG).
+      Leading zeros now carry a TERTIARY weight in the default sort, so
+      `007 < 07 < 7` and `-007 < -7` are real orderings — the default order is
+      total instead of leaning on the CLI's raw-byte tie-break. In the numeric
+      modes they deliberately still tie, since there they are the same number.
+      6 new unit tests + 10 CLI tests. (2026-07-31 20:30 EDT)
+- [x] CJK scope boundary documented in README: code-point order today, why it
+      needs dictionaries rather than tables (pinyin/polyphones, yomi, hangul as
+      the exception), and the reading-column + `-t`/`-k` escape hatch.
+      (2026-07-31 20:30 EDT)
+
+Current test count: 192 passed, 0 failed (57 Zig unit + 135 CLI integration).
 
 ## Open follow-ups
 
 - [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
       — needs the host secret; see report if it required interactive sudo.
-- [ ] Document the CJK scope boundary in README "Limits": CJK currently falls
-      into CLASS_OTHER (code-point order) — reproducible and non-corrupting, but
-      NOT linguistically ordered. State the escape hatch explicitly: supply a
-      reading/romanization column and sort it with `-t`/`-k` (this is what
-      Japanese systems actually do — the yomi field), which needs no dictionary
-      in our binary.
-- [ ] Fullwidth/halfwidth folding (U+FF00–U+FFEF, ~225 entries, NO dictionary):
-      fold fullwidth ASCII to ASCII and halfwidth katakana to fullwidth. Today a
-      fullwidth `５` is CLASS_OTHER, so fullwidth numerals get NO natural-numeric
-      treatment and fullwidth Latin sorts after every letter. Cheap real win.
-- [ ] `docs/` is an empty placeholder — populate (a `docs/CJK.md` scope note is
-      the obvious first tenant) or remove it.
+- [ ] **Compatibility folding** (Peter's "what about other letter-like things?",
+      2026-07-31). Fullwidth digits are one instance of a much larger, but
+      BOUNDED and already-standardized, family: Unicode's compatibility
+      decomposition (NFKD/NFKC, `UnicodeData.txt` field 5). It is a deterministic
+      TABLE, not a dictionary, so it fits the project thesis — unlike CJK.
+      The family, roughly in value order:
+      - **Fullwidth/Halfwidth Forms** U+FF00–FFEF (~225): fullwidth ASCII →
+        ASCII, halfwidth katakana → katakana. Cheapest, highest value.
+      - **Mathematical Alphanumeric Symbols** U+1D400–1D7FF: bold/italic/script/
+        fraktur/double-struck/sans/monospace letters AND digits (𝟎-𝟿). ~1000
+        code points but ALGORITHMIC — contiguous 26/26/10 runs with a handful of
+        holes (the letterlike-symbol borrowings), so it is arithmetic plus a
+        small exception table, not a big table.
+      - **Enclosed Alphanumerics** U+2460–24FF (①, Ⓐ), **Roman numerals**
+        U+2160–217F (Ⅷ), **super/subscripts** U+2070–209F (², ₃),
+        **Letterlike Symbols** U+2100–214F (ℂ, ℌ, №), vulgar fractions (½).
+        Small tables each.
+      Design notes when this is picked up: (a) fold at the PRIMARY level with a
+      TERTIARY distinction, exactly like the existing ligature expansions, so Ⓐ
+      sorts with A without being identical to it; (b) several are EXPANSIONS
+      (½ → 1⁄2, ™ → TM, Ⅷ → VIII), so the existing `foldExpansion` mechanism must
+      grow past 2 letters; (c) **the numeric scanner is the real work** — it
+      currently tests raw bytes (`b >= '0' and b <= '9'`), so fullwidth digits
+      would have to be folded BEFORE the digit-run scan to participate in
+      natural-numeric ordering. That is a change to the hot loop, not just a new
+      table. Recommend shipping the fullwidth block first behind the same
+      opt-in-free default, and deferring the rest.
 - [ ] `strcoll8` allocates two temp keys per call; add an allocation-free
       streaming level-by-level comparator for the common early-exit case.
-- [ ] Numeric follow-ups now that signs and decimals exist (all documented as
-      caveats in `docs/NUMERIC.md`, none currently a silent surprise):
-      explicit `+` as a sign (today `+5 < -3`, which is wrong when `+` and `-`
-      are mixed); and deciding whether
-      leading-zero collisions (`007` == `7`) should become a tertiary-level
-      distinction so the library's order is total without relying on the CLI's
-      raw-byte tie-break.
 
 ## Deferred (future, noted in README Limits)
 

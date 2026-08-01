@@ -284,6 +284,25 @@ const NUM_ESCALATE: u8 = 0xFF;
 /// +WEIGHT_BASE offset inside one byte, keeping every key byte >= 0x02.
 const NUM_RADIX: usize = 254;
 
+/// Leading zeros carry no VALUE, so they cannot live at the primary level — but
+/// dropping them entirely made "007" and "7" produce identical keys, leaving the
+/// library's order a preorder rather than a total order and quietly delegating
+/// the tie to the CLI's raw-byte fallback. They are therefore a TERTIARY weight
+/// in the default text sort: more leading zeros sorts first, and only once value
+/// and diacritics have already tied.
+///
+/// In the numeric modes (OPT_DECIMAL / OPT_SCIENTIFIC) the distinction is
+/// deliberately NOT made: there, 007 and 7 are the same number and must compare
+/// equal.
+const NUM_ZERO_MAX: usize = 250;
+const NUM_ZERO_TOP: u8 = WEIGHT_BASE + NUM_ZERO_MAX; // 0xFC; count 0 => 0xFC
+
+fn leadingZeroWeight(run: []const u8) u8 {
+    var z: usize = 0;
+    while (z < run.len and run[z] == '0') z += 1;
+    return NUM_ZERO_TOP - @as(u8, @intCast(@min(z, NUM_ZERO_MAX)));
+}
+
 // ─── Inverted (negative) numeric weights ─────────────────────────────────
 // For a negative number the order must REVERSE: a bigger magnitude is a smaller
 // value. Every weight below is therefore a complement, chosen so the result
@@ -570,6 +589,7 @@ fn pushScientific(
 /// A signed and/or fractional number found at the START of the collated string.
 const LeadingNum = struct {
     neg: bool,
+    zeros: usize, // leading zeros stripped from `int`, kept for the tertiary weight
     int: []const u8, // significant integer digits, leading zeros stripped
     frac: []const u8, // fractional digits, trailing zeros stripped
     end: usize, // index just past the consumed number
@@ -612,7 +632,7 @@ fn parseLeadingNumber(s: []const u8, decimal: bool) ?LeadingNum {
     }
 
     if (!neg and !had_dot) return null; // exactly the pre-existing behavior
-    return .{ .neg = neg, .int = int_digits, .frac = frac, .end = i };
+    return .{ .neg = neg, .zeros = z, .int = int_digits, .frac = frac, .end = i };
 }
 
 /// Emit one signed/fractional number as a single primary element. Contributes
@@ -634,7 +654,9 @@ fn pushSignedDecimal(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: Lea
         for (n.frac) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
     }
     try l2.append(alloc, WEIGHT_BASE + D_NONE);
-    try l3.append(alloc, CASE_NEUTRAL);
+    // Same tertiary leading-zero weight the unsigned path uses, so -007 < -7 is
+    // a real ordering rather than a tie resolved by the caller.
+    try l3.append(alloc, NUM_ZERO_TOP - @as(u8, @intCast(@min(n.zeros, NUM_ZERO_MAX))));
 }
 
 /// Append the primary bytes for one ASCII digit run, length-prefixed with the
@@ -741,9 +763,14 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
         // EVERY run, not just a leading one ("thing1 000" must beat "thing999").
         // A sign is still only honored at offset 0.
         if (decimal) {
-            const neg = i == 0 and b == '-' and s.len > 1 and s[1] >= '0' and s[1] <= '9';
-            if (neg or (b >= '0' and b <= '9')) {
-                const run = scanGroupedNumber(s, if (neg) i + 1 else i, comma_dec, absorb);
+            const signed = i == 0 and s.len > 1 and s[1] >= '0' and s[1] <= '9';
+            const neg = signed and b == '-';
+            // An explicit '+' is a sign only in a numeric mode. In the default
+            // text sort it stays punctuation, which ranks BELOW CLASS_NEG and
+            // would otherwise put "+5" under every negative.
+            const pos = signed and b == '+';
+            if (neg or pos or (b >= '0' and b <= '9')) {
+                const run = scanGroupedNumber(s, if (neg or pos) i + 1 else i, comma_dec, absorb);
                 if (sci) {
                     const ex = scanExponent(s, run.end);
                     try pushScientific(&l1, &l2, &l3, alloc, s, run, if (ex) |e| e.exp else 0, neg);
@@ -762,7 +789,8 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             while (j < s.len and s[j] >= '0' and s[j] <= '9') j += 1;
             try pushNumericPrimary(&l1, alloc, s[i..j]);
             try l2.append(alloc, WEIGHT_BASE + D_NONE);
-            try l3.append(alloc, CASE_NEUTRAL);
+            // Tertiary: leading-zero count, so 007 < 07 < 7 instead of tying.
+            try l3.append(alloc, leadingZeroWeight(s[i..j]));
             i = j;
             continue;
         }
@@ -1021,6 +1049,66 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 9: explicit '+' sign, and leading zeros as a default distinction ──
+
+test "plus: '+' is NOT a sign in default mode" {
+    const h: u32 = 0;
+    // Default mode is a text sort; '+' stays punctuation, ranking below digits.
+    try expectOrder(h, "+5", "5");
+    try expectOrder(h, "+5", "+10"); // natural numeric after the punctuation
+}
+
+test "plus: '+' IS a sign under --dec / --sci" {
+    for ([_]u32{ OPT_DECIMAL, OPT_SCIENTIFIC, OPT_SCIENTIFIC | OPT_DECIMAL }) |o| {
+        // The bug this fixes: '+' used to rank below CLASS_NEG, so an explicit
+        // plus sorted BELOW every negative.
+        try expectOrder(o, "-3", "+5");
+        try expectOrder(o, "-10", "+2");
+        try expectOrder(o, "+5", "+10");
+        // A signed positive is the same VALUE as the unsigned form.
+        try testing.expectEqual(@as(i32, 0), try compareAlloc(testing.allocator, o, "+5", "5"));
+    }
+}
+
+test "plus: a '+' not at offset 0, or not before a digit, stays punctuation" {
+    const o = OPT_DECIMAL;
+    try expectOrder(o, "peter+3", "peter+4");
+    try expectOrder(o, "+abc", "+abd");
+}
+
+test "zeros: leading zeros are a REAL distinction in default mode" {
+    const h: u32 = 0;
+    // Previously "007" and "7" produced identical keys and compared EQUAL, so
+    // the library's order was only a preorder and the CLI's raw-byte tie-break
+    // was doing the work. More leading zeros now sorts first, for real.
+    try expectOrder(h, "007", "07");
+    try expectOrder(h, "07", "7");
+    try expectOrder(h, "word007", "word7");
+    try expectOrder(h, "00", "0");
+    // ...without disturbing value ordering, which still dominates.
+    try expectOrder(h, "007", "8");
+    try expectOrder(h, "9", "010");
+    // Negatives take the same tertiary weight, so this is a real ordering rather
+    // than a tie the CLI's raw-byte fallback happens to resolve the same way.
+    try expectOrder(h, "-007", "-7");
+    try testing.expect((try compareAlloc(testing.allocator, h, "-007", "-7")) != 0);
+}
+
+test "zeros: leading zeros COLLIDE under --dec / --sci (they are equal values)" {
+    for ([_]u32{ OPT_DECIMAL, OPT_SCIENTIFIC }) |o| {
+        try testing.expectEqual(@as(i32, 0), try compareAlloc(testing.allocator, o, "007", "7"));
+        try testing.expectEqual(@as(i32, 0), try compareAlloc(testing.allocator, o, "00", "0"));
+    }
+}
+
+test "zeros: the distinction is TERTIARY — it never outranks value or letters" {
+    const h: u32 = 0;
+    // Equal primary+secondary is required before the zero count is consulted.
+    try expectOrder(h, "007", "7"); // same value, zeros decide
+    try expectOrder(h, "7", "07a"); // ...but a longer primary still wins first
+    try expectOrder(h, "007a", "7a");
 }
 
 // ── Phase 8: scientific notation ──
