@@ -251,6 +251,35 @@ for flag in -d -s; do
 	fi
 done
 
+echo "── folded digit forms take part in natural-numeric ordering ──"
+assert_order "fullwidth, embedded"       -- word2 word５ word10
+assert_order "fullwidth, bare"           -- ９ １０
+assert_order "run may MIX widths"        -- 9 １0 11
+assert_order "math bold digits"          -- 2 𝟗 𝟏𝟎
+assert_order "math double-struck"        -- 𝟚 10
+assert_order "math monospace"            -- 𝟸 10
+assert_order "folded under -d"        -d -- ９ １０
+assert_order "folded under -s"        -s -- ９ １０
+# Same value, so this must be a real ordering rather than an input-order artifact.
+one_a=$(printf '1\n１\n' | "$CLI" | tr '\n' ' ')
+one_b=$(printf '１\n1\n' | "$CLI" | tr '\n' ' ')
+if [[ "$one_a" == "$one_b" && "$one_a" == "1 １ " ]]; then
+	pass "ASCII and fullwidth 1 stay distinguishable, order independent of input"
+else
+	fail "1 vs １ unstable or misordered: '$one_a' vs '$one_b'"
+fi
+# Specificity: fullwidth and mathematical LETTERS must not become digits.
+letters_bad=""
+for c in Ａ ａ 𝐀 𝔄 𝕬; do
+	first=$(printf '%s\nzz\n' "$c" | "$CLI" | head -1)
+	[[ "$first" == "zz" ]] || letters_bad+=" $c"
+done
+if [[ -z "$letters_bad" ]]; then
+	pass "fullwidth/math letters still CLASS_OTHER (not folded to digits)"
+else
+	fail "these wrongly fold:$letters_bad"
+fi
+
 echo "── negative control: what sort -g gets wrong ──"
 # 25 nines vs 1e25 both collapse to the same long double, so -g ties and falls
 # back to byte order, which is inverted here. We must NOT do that.

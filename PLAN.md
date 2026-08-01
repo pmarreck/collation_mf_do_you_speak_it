@@ -114,15 +114,54 @@ maintained_by: agent
       the exception), and the reading-column + `-t`/`-k` escape hatch.
       (2026-07-31 20:30 EDT)
 
-Current test count: 192 passed, 0 failed (57 Zig unit + 135 CLI integration).
+- [x] **Folded digit forms take part in natural-numeric ordering** (Peter's
+      items 1 and 4, 2026-07-31). `digitAt()` folds ASCII, fullwidth
+      (U+FF10..FF19), and all five Mathematical Alphanumeric digit styles
+      (U+1D7CE..1D7FF, arithmetic rather than a table) BEFORE the digit-run scan,
+      so they sort as numbers instead of landing in CLASS_OTHER after every
+      letter. A single run may mix widths (`１0` == 10). Folded forms carry a
+      SECONDARY style weight so `1` < `１` rather than tying, keeping the order
+      total. The ASCII test stays a single byte compare ahead of any decoding, so
+      the common path is unchanged.
+      Required converting every byte-wise digit loop to be code-point aware:
+      `pushNumericPrimary`, `countSigDigits`, `emitSigDigits`, `emitFracDigits`,
+      `leadingZeroWeight`, `scanGroupedNumber`, `parseLeadingNumber`, and the
+      main scanner branch. Bug found during this: `pushNumericPrimary` gated on
+      the code-point count but still EMITTED `sig.len` (bytes), so a fullwidth
+      digit counted as 3 and `５` sorted after `10`. 6 new unit tests + 11 CLI
+      tests. (2026-07-31 22:25 EDT)
+
+Current test count: 198 passed, 0 failed (63 Zig unit + 135 CLI integration).
 
 ## Open follow-ups
 
 - [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
       — needs the host secret; see report if it required interactive sudo.
-- [ ] **Compatibility folding** (Peter's "what about other letter-like things?",
-      2026-07-31). Fullwidth digits are one instance of a much larger, but
-      BOUNDED and already-standardized, family: Unicode's compatibility
+- [ ] **(b) General compatibility EXPANSION** — next in the agreed sequence.
+      `foldExpansion` currently returns exactly two base letters, which cannot
+      express `Ⅷ` → `VIII` (four) or `½` → `1⁄2` (digits plus punctuation, not
+      letters at all). Replace it with a mechanism returning a replacement BYTE
+      STRING that the scanner re-processes, which covers both shapes and also
+      gives `™` → `TM`, `№` → `No`. Blocks: Number Forms U+2150..218F (vulgar
+      fractions + Roman numerals), Letterlike Symbols U+2100..214F.
+- [ ] **(c) `--roman`** — depends on (b). Implicit Roman-numeral sorting, opt-in
+      because detection is genuinely ambiguous ("MIX" is both a word and 1009,
+      "CIVIL" starts with valid Roman letters). Notes:
+      * The canonical letters are **I V X L C D M** — seven, not five. (Peter's
+        first list omitted L=50 and D=500.)
+      * Beyond ASCII there are also Unicode Number Forms: U+2160..216F (Ⅰ..Ⅿ),
+        U+2170..217F (ⅰ..ⅿ), and U+2180..2188 (ↀ 1000, ↁ 5000, ↂ 10000, Ↄ, ↅ, ↆ,
+        ↇ 50000, ↈ 100000). These should fold via (b) into ASCII letters first,
+        so `--roman` only ever sees `IVXLCDM`.
+      * Accept only CANONICAL form (`M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})`)
+        and only when the WHOLE token matches — a looser grammar turns ordinary
+        words into numbers.
+      * Emit as a numeric element so `IV` lands between 3 and 5.
+      * Not representable and out of scope: vinculum/apostrophus (overline = x1000).
+- [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
+      things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
+      digits were one instance of a much larger, but BOUNDED and
+      already-standardized, family: Unicode's compatibility
       decomposition (NFKD/NFKC, `UnicodeData.txt` field 5). It is a deterministic
       TABLE, not a dictionary, so it fits the project thesis — unlike CJK.
       The family, roughly in value order:

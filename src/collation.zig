@@ -284,6 +284,51 @@ const NUM_ESCALATE: u8 = 0xFF;
 /// +WEIGHT_BASE offset inside one byte, keeping every key byte >= 0x02.
 const NUM_RADIX: usize = 254;
 
+/// Secondary weight marking that a digit run contained a non-ASCII digit form.
+/// Same value, so primary ties; this keeps the order total without needing the
+/// caller's tie-break, mirroring how ligatures are separated at tertiary.
+const DIGIT_STYLE_ASCII: u8 = 0;
+const DIGIT_STYLE_FOLDED: u8 = 1;
+
+/// Decimal value and byte length of the digit at `s[i]`, or null if there is no
+/// digit there.
+///
+/// Folds non-ASCII decimal forms so they take part in natural-numeric ordering
+/// instead of falling through to CLASS_OTHER and sorting after every letter:
+///   * ASCII `0`-`9`
+///   * Fullwidth `０`-`９`   U+FF10..FF19
+///   * Mathematical Alphanumeric digits U+1D7CE..1D7FF — five styles of ten
+///     (bold, double-struck, sans-serif, sans-serif bold, monospace), which are
+///     contiguous, so the value is arithmetic rather than a table.
+/// The ASCII test comes first and costs one byte compare, so the common path is
+/// unaffected by the decoding below it.
+fn digitAt(s: []const u8, i: usize) ?struct { v: u8, len: u8 } {
+    const b = s[i];
+    if (b >= '0' and b <= '9') return .{ .v = b - '0', .len = 1 };
+    if (b < 0x80) return null;
+    const seqlen = std.unicode.utf8ByteSequenceLength(b) catch return null;
+    if (i + seqlen > s.len) return null;
+    const cp = std.unicode.utf8Decode(s[i .. i + seqlen]) catch return null;
+    if (cp >= 0xFF10 and cp <= 0xFF19)
+        return .{ .v = @intCast(cp - 0xFF10), .len = seqlen };
+    if (cp >= 0x1D7CE and cp <= 0x1D7FF)
+        return .{ .v = @intCast((cp - 0x1D7CE) % 10), .len = seqlen };
+    return null;
+}
+
+/// Extent of the digit run starting at `i`, plus whether any non-ASCII digit
+/// form appeared in it.
+fn scanDigitRun(s: []const u8, i: usize) struct { end: usize, style: u8 } {
+    var j = i;
+    var style: u8 = DIGIT_STYLE_ASCII;
+    while (j < s.len) {
+        const d = digitAt(s, j) orelse break;
+        if (d.len > 1) style = DIGIT_STYLE_FOLDED;
+        j += d.len;
+    }
+    return .{ .end = j, .style = style };
+}
+
 /// Leading zeros carry no VALUE, so they cannot live at the primary level — but
 /// dropping them entirely made "007" and "7" produce identical keys, leaving the
 /// library's order a preorder rather than a total order and quietly delegating
@@ -297,10 +342,20 @@ const NUM_RADIX: usize = 254;
 const NUM_ZERO_MAX: usize = 250;
 const NUM_ZERO_TOP: u8 = WEIGHT_BASE + NUM_ZERO_MAX; // 0xFC; count 0 => 0xFC
 
-fn leadingZeroWeight(run: []const u8) u8 {
+fn leadingZeroCount(run: []const u8) usize {
     var z: usize = 0;
-    while (z < run.len and run[z] == '0') z += 1;
-    return NUM_ZERO_TOP - @as(u8, @intCast(@min(z, NUM_ZERO_MAX)));
+    var k: usize = 0;
+    while (k < run.len) {
+        const d = digitAt(run, k) orelse break;
+        if (d.v != 0) break;
+        z += 1;
+        k += d.len;
+    }
+    return z;
+}
+
+fn leadingZeroWeight(run: []const u8) u8 {
+    return NUM_ZERO_TOP - @as(u8, @intCast(@min(leadingZeroCount(run), NUM_ZERO_MAX)));
 }
 
 // ─── Inverted (negative) numeric weights ─────────────────────────────────
@@ -380,15 +435,15 @@ const GroupedRun = struct {
 fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool, absorb: bool) GroupedRun {
     var i = start;
     while (i < s.len) {
-        if (s[i] >= '0' and s[i] <= '9') {
-            i += 1;
+        if (digitAt(s, i)) |d| {
+            i += d.len;
             continue;
         }
         const sl = if (absorb) groupSepLen(s, i, comma_decimal) else 0;
         // Absorb ONLY when a digit follows, i.e. the separator sits BETWEEN two
         // digits. That is what keeps "Smith 1 000" from swallowing the space
         // after the name, and "abc, 5" from swallowing the comma.
-        if (sl == 0 or i + sl >= s.len or s[i + sl] < '0' or s[i + sl] > '9') break;
+        if (sl == 0 or i + sl >= s.len or digitAt(s, i + sl) == null) break;
         i += sl;
     }
     const int_end = i;
@@ -396,10 +451,13 @@ fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool, absorb: b
     var fs = i;
     var fe = i;
     const dec: u8 = if (comma_decimal) ',' else '.';
-    if (i + 1 < s.len and s[i] == dec and s[i + 1] >= '0' and s[i + 1] <= '9') {
+    if (i + 1 < s.len and s[i] == dec and digitAt(s, i + 1) != null) {
         i += 1;
         fs = i;
-        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        while (i < s.len) {
+            const d = digitAt(s, i) orelse break;
+            i += d.len;
+        }
         fe = i;
         // Trailing zeros carry no value: 1.50 == 1.5, 1.00 == 1.
         while (fe > fs and s[fe - 1] == '0') fe -= 1;
@@ -411,27 +469,32 @@ fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool, absorb: b
 fn countSigDigits(s: []const u8) usize {
     var n: usize = 0;
     var started = false;
-    for (s) |c| {
-        if (c < '0' or c > '9') continue;
-        if (!started) {
-            if (c == '0') continue;
-            started = true;
-        }
-        n += 1;
+    var i: usize = 0;
+    while (i < s.len) {
+        if (digitAt(s, i)) |d| {
+            i += d.len;
+            if (!started) {
+                if (d.v == 0) continue;
+                started = true;
+            }
+            n += 1;
+        } else i += 1; // an absorbed group separator
     }
     return n;
 }
 
 fn emitSigDigits(l1: *L1, alloc: std.mem.Allocator, s: []const u8, invert: bool) !void {
     var started = false;
-    for (s) |c| {
-        if (c < '0' or c > '9') continue;
-        if (!started) {
-            if (c == '0') continue;
-            started = true;
-        }
-        const d = c - '0';
-        try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d else WEIGHT_BASE + d);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (digitAt(s, i)) |d| {
+            i += d.len;
+            if (!started) {
+                if (d.v == 0) continue;
+                started = true;
+            }
+            try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d.v else WEIGHT_BASE + d.v);
+        } else i += 1; // an absorbed group separator
     }
 }
 
@@ -440,9 +503,11 @@ fn emitSigDigits(l1: *L1, alloc: std.mem.Allocator, s: []const u8, invert: bool)
 /// varied precision work without padding: "5" vs "25" compares 5 against 2, so
 /// 1.25 < 1.5 even though 1.25 has more digits.
 fn emitFracDigits(l1: *L1, alloc: std.mem.Allocator, s: []const u8, invert: bool) !void {
-    for (s) |c| {
-        const d = c - '0';
-        try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d else WEIGHT_BASE + d);
+    var i: usize = 0;
+    while (i < s.len) {
+        const d = digitAt(s, i) orelse break;
+        try l1.append(alloc, if (invert) NEG_DIGIT_TOP - d.v else WEIGHT_BASE + d.v);
+        i += d.len;
     }
 }
 
@@ -605,11 +670,14 @@ const LeadingNum = struct {
 /// compatibility true BY CONSTRUCTION rather than by careful duplication.
 fn parseLeadingNumber(s: []const u8, decimal: bool) ?LeadingNum {
     var i: usize = 0;
-    const neg = s.len > 1 and s[0] == '-' and s[1] >= '0' and s[1] <= '9';
+    const neg = s.len > 1 and s[0] == '-' and digitAt(s, 1) != null;
     if (neg) i = 1;
 
     const int_start = i;
-    while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+    while (i < s.len) {
+        const d = digitAt(s, i) orelse break;
+        i += d.len;
+    }
     if (i == int_start) return null; // no digit run here at all
 
     var int_digits = s[int_start..i];
@@ -619,11 +687,14 @@ fn parseLeadingNumber(s: []const u8, decimal: bool) ?LeadingNum {
 
     var frac: []const u8 = &.{};
     var had_dot = false;
-    if (decimal and i + 1 < s.len and s[i] == '.' and s[i + 1] >= '0' and s[i + 1] <= '9') {
+    if (decimal and i + 1 < s.len and s[i] == '.' and digitAt(s, i + 1) != null) {
         had_dot = true;
         const fs = i + 1;
         i += 1;
-        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        while (i < s.len) {
+            const d = digitAt(s, i) orelse break;
+            i += d.len;
+        }
         frac = s[fs..i];
         // Trailing zeros are not significant in a fraction: 1.50 == 1.5, 1.00 == 1.
         var e = frac.len;
@@ -674,18 +745,30 @@ fn pushSignedDecimal(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: Lea
 /// range (0xFF) because ordering wants it above all content, not in the middle.
 fn pushNumericPrimary(l1: *L1, alloc: std.mem.Allocator, run: []const u8) !void {
     var start: usize = 0;
-    while (start < run.len and run[start] == '0') start += 1;
+    while (start < run.len) {
+        const d = digitAt(run, start) orelse break;
+        if (d.v != 0) break;
+        start += d.len;
+    }
     const sig = run[start..]; // significant digits, no leading zeros (may be empty => value 0)
+    // Digits may be multi-byte once folded, so count code points, not bytes.
+    var sig_n: usize = 0;
+    var scan: usize = 0;
+    while (scan < sig.len) {
+        const d = digitAt(sig, scan) orelse break;
+        sig_n += 1;
+        scan += d.len;
+    }
     try l1.append(alloc, CLASS_DIGIT);
-    if (sig.len <= NUM_SHORT_MAX) {
-        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(sig.len)));
+    if (sig_n <= NUM_SHORT_MAX) {
+        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(sig_n)));
     } else {
         // Long form: NUM_ESCALATE, then how many base-254 digits the length
         // needs, then the length itself big-endian. Ordering holds at each step:
         // the sigil beats every short form; a longer length-of-length beats a
         // shorter one; and equal-width lengths compare big-endian == numerically.
         var tmp: [8]u8 = undefined; // 254^8 digits exceeds any physical input
-        var n = sig.len;
+        var n = sig_n;
         var k: usize = 0;
         while (n > 0) : (k += 1) {
             tmp[k] = @intCast(n % NUM_RADIX);
@@ -698,7 +781,12 @@ fn pushNumericPrimary(l1: *L1, alloc: std.mem.Allocator, run: []const u8) !void 
             try l1.append(alloc, WEIGHT_BASE + tmp[k]);
         }
     }
-    for (sig) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
+    var emit: usize = 0;
+    while (emit < sig.len) {
+        const d = digitAt(sig, emit) orelse break;
+        try l1.append(alloc, WEIGHT_BASE + d.v);
+        emit += d.len;
+    }
 }
 
 /// Append the primary bytes for an OTHER (unknown) code point: a class byte
@@ -763,13 +851,13 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
         // EVERY run, not just a leading one ("thing1 000" must beat "thing999").
         // A sign is still only honored at offset 0.
         if (decimal) {
-            const signed = i == 0 and s.len > 1 and s[1] >= '0' and s[1] <= '9';
+            const signed = i == 0 and s.len > 1 and digitAt(s, 1) != null;
             const neg = signed and b == '-';
             // An explicit '+' is a sign only in a numeric mode. In the default
             // text sort it stays punctuation, which ranks BELOW CLASS_NEG and
             // would otherwise put "+5" under every negative.
             const pos = signed and b == '+';
-            if (neg or pos or (b >= '0' and b <= '9')) {
+            if (neg or pos or digitAt(s, i) != null) {
                 const run = scanGroupedNumber(s, if (neg or pos) i + 1 else i, comma_dec, absorb);
                 if (sci) {
                     const ex = scanExponent(s, run.end);
@@ -783,15 +871,17 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             }
         }
 
-        // Natural numeric run (default-on in house style).
-        if (b >= '0' and b <= '9') {
-            var j = i;
-            while (j < s.len and s[j] >= '0' and s[j] <= '9') j += 1;
-            try pushNumericPrimary(&l1, alloc, s[i..j]);
-            try l2.append(alloc, WEIGHT_BASE + D_NONE);
+        // Natural numeric run (default-on in house style). Digits may be
+        // fullwidth or Mathematical Alphanumeric forms, so the run is scanned by
+        // code point rather than by byte.
+        if (digitAt(s, i) != null) {
+            const run = scanDigitRun(s, i);
+            try pushNumericPrimary(&l1, alloc, s[i..run.end]);
+            // Secondary: digit style, so "1" and "１" stay distinguishable.
+            try l2.append(alloc, WEIGHT_BASE + D_NONE + run.style);
             // Tertiary: leading-zero count, so 007 < 07 < 7 instead of tying.
-            try l3.append(alloc, leadingZeroWeight(s[i..j]));
-            i = j;
+            try l3.append(alloc, leadingZeroWeight(s[i..run.end]));
+            i = run.end;
             continue;
         }
 
@@ -1049,6 +1139,60 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 10: fold non-ASCII decimal digits into the numeric run ──
+
+test "digits: fullwidth numerals participate in natural-numeric ordering" {
+    const h: u32 = 0;
+    // U+FF10..FF19. Previously CLASS_OTHER, so they sorted after every letter
+    // and got no numeric treatment at all.
+    try expectOrder(h, "word５", "word10");
+    try expectOrder(h, "９", "１０");
+    try expectOrder(h, "file２", "file10");
+    try expectOrder(h, "１", "２");
+}
+
+test "digits: a run may MIX widths" {
+    const h: u32 = 0;
+    try expectOrder(h, "9", "１0"); // fullwidth 1 + ASCII 0 == 10
+    try expectOrder(h, "１0", "11"); // 10 < 11
+    try expectOrder(h, "1２3", "124"); // 123 < 124, mixed run
+}
+
+test "digits: mathematical alphanumeric digits fold too" {
+    const h: u32 = 0;
+    // U+1D7CE..1D7FF — five styles of ten, all algorithmic.
+    try expectOrder(h, "𝟐", "10"); // bold 2
+    try expectOrder(h, "𝟚", "10"); // double-struck 2
+    try expectOrder(h, "𝟸", "10"); // monospace 2
+    try expectOrder(h, "𝟗", "𝟏𝟎"); // bold 9 < bold 10
+    try expectOrder(h, "𝟣", "𝟤"); // sans-serif 1 < 2
+}
+
+test "digits: folded digits also work under the numeric modes" {
+    for ([_]u32{ OPT_DECIMAL, OPT_SCIENTIFIC }) |o| {
+        try expectOrder(o, "９", "１０");
+        try expectOrder(o, "𝟐", "10");
+    }
+}
+
+test "digits: folded forms stay DISTINGUISHABLE from ASCII (total order)" {
+    const h: u32 = 0;
+    // Same value, so primary and secondary tie; a tertiary style weight keeps
+    // the order total rather than delegating to the caller's tie-break.
+    try expectOrder(h, "1", "１");
+    try testing.expect((try compareAlloc(testing.allocator, h, "1", "１")) != 0);
+    try testing.expect((try compareAlloc(testing.allocator, h, "12", "1２")) != 0);
+}
+
+test "digits: non-digit lookalikes are NOT folded" {
+    const h: u32 = 0;
+    // Specificity: fullwidth LETTERS and math letters must not become digits.
+    // They stay CLASS_OTHER for now, i.e. after "zz".
+    for ([_][]const u8{ "Ａ", "ａ", "𝐀", "𝔄" }) |c| {
+        try expectOrder(h, "zz", c);
+    }
 }
 
 // ── Phase 9: explicit '+' sign, and leading zeros as a default distinction ──
