@@ -146,26 +146,25 @@ maintained_by: agent
       The `/` carries CASE_NEUTRAL_LIG instead, which suffices since every
       fraction has one. 5 new unit tests + 6 CLI tests. (2026-08-01 02:42 EDT)
 
-Current test count: 213 passed, 0 failed (68 Zig unit + 145 CLI integration).
+- [x] **(c) `--roman`.** Whole-token Roman numerals ordered by VALUE (VII < IX).
+      Canonical validation is parse-then-re-render, which is the canonical
+      grammar without writing the grammar: IIII renders as IV, IM renders as MI,
+      CIVIC parses to 205 rendering CCV, so all are rejected. Whole-token +
+      uniform-case rules reject CIVIL, DID, MIL, LID and Mix. MIX is genuinely
+      1009, which is why the flag is opt-in. Unicode numeral chars U+2160..2180
+      route through phase (b) first, so only ASCII IVXLCDM is ever parsed.
+      BUG found and fixed during this: on a failed parse the ENTIRE letter run
+      must be consumed — emitting one character and looping let the check
+      re-enter mid-word and match a trailing suffix, so CIVIL ended with the
+      number 50 and CIVIC with 100, inverting them. 7 new unit tests + 11 CLI
+      tests. (2026-08-01 03:00 EDT)
+
+Current test count: 237 passed, 0 failed (75 Zig unit + 162 CLI integration).
 
 ## Open follow-ups
 
 - [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
       — needs the host secret; see report if it required interactive sudo.
-- [ ] **(c) `--roman`** — depends on (b). Implicit Roman-numeral sorting, opt-in
-      because detection is genuinely ambiguous ("MIX" is both a word and 1009,
-      "CIVIL" starts with valid Roman letters). Notes:
-      * The canonical letters are **I V X L C D M** — seven, not five. (Peter's
-        first list omitted L=50 and D=500.)
-      * Beyond ASCII there are also Unicode Number Forms: U+2160..216F (Ⅰ..Ⅿ),
-        U+2170..217F (ⅰ..ⅿ), and U+2180..2188 (ↀ 1000, ↁ 5000, ↂ 10000, Ↄ, ↅ, ↆ,
-        ↇ 50000, ↈ 100000). These should fold via (b) into ASCII letters first,
-        so `--roman` only ever sees `IVXLCDM`.
-      * Accept only CANONICAL form (`M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})`)
-        and only when the WHOLE token matches — a looser grammar turns ordinary
-        words into numbers.
-      * Emit as a numeric element so `IV` lands between 3 and 5.
-      * Not representable and out of scope: vinculum/apostrophus (overline = x1000).
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and

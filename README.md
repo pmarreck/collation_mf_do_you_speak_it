@@ -76,6 +76,8 @@ collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
   -s, --sci, --scientific[=SEP]  Order by value with exponents (2e5 < 1e10);
                                plain numbers normalize as exponent 0
   -n, --num, --numeric[=SEP]   Both -d and -s
+      --roman                  Order whole-token Roman numerals by value
+                               (VII < IX); canonical uniform-case tokens only
       --version-sort           Explicit form of the default dot handling
   -h, --help                   Show help
       --about                  One-line version + platform

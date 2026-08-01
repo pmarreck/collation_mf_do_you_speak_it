@@ -77,6 +77,14 @@ extern "C" {
  * digit-group absorption. Setting both is what `--numeric` does. */
 #define COLLATION_MF_SCIENTIFIC     (1u << 5)
 
+/* Order whole-token Roman numerals by VALUE (VII < IX) rather than as text.
+ * Opt-in because detection is irreducibly ambiguous: "MIX" is a real word AND a
+ * canonical numeral for 1009. Only CANONICAL spellings of a COMPLETE token in
+ * uniform case qualify, which rejects "CIVIL", "DID", "IIII" and "Mix".
+ * A recognized numeral becomes a numeric element, so IV sorts between 3 and 5
+ * and therefore below every letter, per the structural-first rule. */
+#define COLLATION_MF_ROMAN          (1u << 6)
+
 /* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
 
 #define COLLATION_MF_LESS     (-1)

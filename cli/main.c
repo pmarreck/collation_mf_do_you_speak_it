@@ -99,6 +99,9 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "                               work. Does NOT absorb group separators.\n"
         "  -n, --num, --numeric[=SEP]   Both of the above: exponents AND\n"
         "                               digit-group absorption.\n"
+        "      --roman                  Order whole-token Roman numerals by value\n"
+        "                               (VII < IX). Canonical, uniform-case tokens\n"
+        "                               only; note MIX is legitimately 1009.\n"
         "      --version-sort           Explicit form of the default dot handling\n"
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
@@ -141,6 +144,7 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "                               nach Wert sortieren (2e5 < 1e10). Zahlen\n"
         "                               ohne Exponent gelten als Exponent 0.\n"
         "  -n, --num, --numeric[=TRZ]   Beides: Exponenten UND Tausendertrenner.\n"
+        "      --roman                  Römische Zahlen nach Wert sortieren (VII < IX)\n"
         "      --version-sort           Ausdrückliche Form des Standardverhaltens\n"
         "  -h, --help / --hilfe         Diese Hilfe anzeigen\n"
         "      --about                  Version + Plattform in einer Zeile\n"
@@ -472,6 +476,8 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(a, "-s") == 0 || strcmp(a, "--scientific") == 0
                        || strcmp(a, "--sci") == 0) {
                 options |= COLLATION_MF_SCIENTIFIC;
+            } else if (strcmp(a, "--roman") == 0) {
+                options |= COLLATION_MF_ROMAN;
             } else if (strcmp(a, "-n") == 0 || strcmp(a, "--numeric") == 0
                        || strcmp(a, "--num") == 0) {
                 options |= COLLATION_MF_SCIENTIFIC | COLLATION_MF_DECIMAL;

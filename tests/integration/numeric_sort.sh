@@ -280,6 +280,22 @@ else
 	fail "these wrongly fold:$letters_bad"
 fi
 
+echo "── --roman: whole-token Roman numerals by value ──"
+assert_order "by value"              --roman -- IV VII IX X XL L MCMXCIV MMXXVI
+assert_order "embedded in text"      --roman -- "Chapter IV" "Chapter VII" "Chapter IX"
+assert_order "lowercase forms"       --roman -- iv vii ix
+assert_order "Unicode numeral chars" --roman -- Ⅳ Ⅶ Ⅸ
+assert_order "OFF by default"                -- IX VII
+# Words built only from Roman letters must stay words. Before the whole-token
+# fix these inverted, because a failed parse re-entered mid-word and matched the
+# trailing L as 50 and C as 100.
+assert_order "CIVIC/CIVIL stay words" --roman -- CIVIC CIVIL
+assert_order "DID/DIM stay words"     --roman -- DID DIM
+assert_order "MIL/MILL stay words"    --roman -- MIL MILL
+assert_order "LID/LIDS stay words"    --roman -- LID LIDS
+assert_order "mixed case stays a word" --roman -- Mix Mob
+assert_order "non-canonical IIII"     --roman -- IIII IIIJ
+
 echo "── negative control: what sort -g gets wrong ──"
 # 25 nines vs 1e25 both collapse to the same long double, so -g ties and falls
 # back to byte order, which is inverted here. We must NOT do that.

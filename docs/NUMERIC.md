@@ -276,3 +276,41 @@ Every item below is verified behavior, not speculation.
   oracle against `bc`** (independent arbitrary-precision) over 60 generated
   integers straddling the 250-digit boundary, corroborated against `sort -n`, and
   a negative control demonstrating the `sort -g` precision failure.
+
+## Roman numerals (`--roman`)
+
+`--roman` orders whole-token Roman numerals by **value**, so `VII < IX` instead
+of the text order `IX < VII`. A recognized numeral becomes a numeric element, so
+`IV` lands between 3 and 5 — and therefore below every letter, per
+structural-first. A secondary style weight keeps `IV` distinguishable from `4`.
+
+Unicode numeral characters (`Ⅳ`, `ⅷ`, U+2160–2180) expand to ASCII letters first
+via the compatibility pass, so `--roman` only ever sees `IVXLCDM`. ↁ, ↂ, ↇ and ↈ
+have no ASCII spelling and stay in `CLASS_OTHER` rather than being given a wrong
+one. Vinculum/apostrophus notation (an overline meaning ×1000) is not
+representable in plain text and is out of scope.
+
+### Why it must be opt-in
+
+Detection is irreducibly ambiguous. **`MIX` is a real English word and a
+canonical numeral for 1009**, and no amount of grammar fixes that. So the flag is
+a declaration, like `--decimal`.
+
+Three rules narrow the damage:
+
+1. **Whole token only.** The maximal ASCII-letter run must parse in full, so
+   `MIXER` is never considered. A non-ASCII letter directly after the run (as in
+   `MIXé`) also disqualifies it.
+2. **Canonical spellings only**, validated by parse-then-re-render: greedily
+   consume the largest token at each step, render the resulting number back, and
+   require it to equal the input. That is the canonical grammar without writing
+   the grammar — `IIII` renders as `IV` and `IM` renders as `MI`, so both are
+   rejected. It also rejects ordinary words built from Roman letters: `CIVIC`
+   parses to 205 which renders `CCV`, `CIVIL` to 155 which renders `CLV`, and
+   `DID`, `MIL`, `LID` fail the same way.
+3. **Uniform case only**, so capitalized prose like `Mix` stays a word.
+
+A bug worth recording, since the fix is not obvious: when a run fails to parse,
+the *entire* run must be consumed as letters. Emitting one character and looping
+lets the check re-enter mid-word and match a trailing suffix — `CIVIL` ended with
+the number 50 and `CIVIC` with 100, which inverted the two.

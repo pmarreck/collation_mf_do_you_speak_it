@@ -49,6 +49,11 @@ pub const OPT_DECIMAL_COMMA: u32 = 1 << 4;
 /// Independent of OPT_DECIMAL: this bit adds exponent handling, OPT_DECIMAL adds
 /// digit-group absorption. `--numeric` sets both.
 pub const OPT_SCIENTIFIC: u32 = 1 << 5;
+/// Order whole-token Roman numerals by VALUE (VII < IX) instead of as text.
+/// Opt-in because detection is irreducibly ambiguous: `MIX` is a real word AND a
+/// canonical numeral for 1009. Only canonical spellings of a COMPLETE token in
+/// uniform case qualify, which rejects `CIVIL`, `DID`, `IIII` and `Mix`.
+pub const OPT_ROMAN: u32 = 1 << 6;
 
 // ─── Sort-key structural bytes ───────────────────────────────────────────
 const TERM: u8 = 0x00; // whole-key terminator (< everything)
@@ -332,13 +337,115 @@ fn compatExpand(cp: u21) ?[]const u8 {
     };
 }
 
+const ROMAN_TOKENS = [_]struct { v: u16, t: []const u8 }{
+    .{ .v = 1000, .t = "M" }, .{ .v = 900, .t = "CM" },
+    .{ .v = 500, .t = "D" },  .{ .v = 400, .t = "CD" },
+    .{ .v = 100, .t = "C" },  .{ .v = 90, .t = "XC" },
+    .{ .v = 50, .t = "L" },   .{ .v = 40, .t = "XL" },
+    .{ .v = 10, .t = "X" },   .{ .v = 9, .t = "IX" },
+    .{ .v = 5, .t = "V" },    .{ .v = 4, .t = "IV" },
+    .{ .v = 1, .t = "I" },
+};
+
+/// Value of a CANONICAL Roman numeral, or null.
+///
+/// Validation is parse-then-re-render: greedily consume the largest token at each
+/// step, then render the resulting number back and require it to equal the input.
+/// That is exactly the canonical grammar without writing the grammar — `IIII`
+/// renders as `IV` and `IM` renders as `MI`, so both are rejected. Requiring the
+/// WHOLE token to match is the real defense: `CIVIL`, `DID`, `MIL` and `LID` are
+/// built only from Roman letters yet none of them parses.
+///
+/// It is not a complete defense, and cannot be — `MIX` is legitimately 1009. That
+/// irreducible ambiguity is why this is behind an opt-in flag.
+///
+/// Mixed case is rejected so ordinary capitalized prose ("Mix") stays a word.
+/// Max canonical value is 3999; the vinculum/apostrophus notations that express
+/// more are not representable in plain text and are out of scope.
+fn romanValue(s: []const u8) ?u16 {
+    if (s.len == 0 or s.len > 15) return null; // MMMDCCCLXXXVIII is the longest
+    var upper: [15]u8 = undefined;
+    var saw_lower = false;
+    var saw_upper = false;
+    for (s, 0..) |c, i| {
+        switch (c) {
+            'I', 'V', 'X', 'L', 'C', 'D', 'M' => {
+                saw_upper = true;
+                upper[i] = c;
+            },
+            'i', 'v', 'x', 'l', 'c', 'd', 'm' => {
+                saw_lower = true;
+                upper[i] = c - ('a' - 'A');
+            },
+            else => return null,
+        }
+    }
+    if (saw_lower and saw_upper) return null;
+    const t = upper[0..s.len];
+
+    var total: u16 = 0;
+    var i: usize = 0;
+    outer: while (i < t.len) {
+        for (ROMAN_TOKENS) |tok| {
+            if (std.mem.startsWith(u8, t[i..], tok.t)) {
+                total += tok.v;
+                i += tok.t.len;
+                continue :outer;
+            }
+        }
+        return null;
+    }
+
+    // Re-render and require an exact match: this is the canonicity check.
+    var render: [15]u8 = undefined;
+    var n: usize = 0;
+    var rem = total;
+    for (ROMAN_TOKENS) |tok| {
+        while (rem >= tok.v) {
+            if (n + tok.t.len > render.len) return null;
+            @memcpy(render[n .. n + tok.t.len], tok.t);
+            n += tok.t.len;
+            rem -= tok.v;
+        }
+    }
+    if (!std.mem.eql(u8, render[0..n], t)) return null;
+    return total;
+}
+
+/// Emit a Roman numeral as a numeric element, so `IV` lands between 3 and 5.
+/// The secondary style weight keeps it distinguishable from the Arabic `4`.
+fn pushRoman(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, value: u16) !void {
+    var buf: [5]u8 = undefined;
+    var n: usize = 0;
+    var v = value;
+    if (v == 0) {
+        buf[0] = '0';
+        n = 1;
+    } else {
+        while (v > 0) : (v /= 10) {
+            buf[n] = @intCast('0' + (v % 10));
+            n += 1;
+        }
+        std.mem.reverse(u8, buf[0..n]);
+    }
+    try pushNumericPrimary(l1, alloc, buf[0..n]);
+    try l2.append(alloc, WEIGHT_BASE + D_NONE + DIGIT_STYLE_ROMAN);
+    try l3.append(alloc, NUM_ZERO_TOP);
+}
+
 /// Emit the elements for a compatibility expansion's replacement text, using the
 /// ordinary rules so digit runs inside it still sort numerically. Every element
 /// is marked with the ligature tertiary rank, which is what keeps `ß` adjacent
 /// to `ss` while still distinguishable from it.
 ///
 /// Replacements are plain ASCII by construction, so this does not recurse.
-fn emitExpansion(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, rep: []const u8) !void {
+fn emitExpansion(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, rep: []const u8, roman: bool) !void {
+    // A Unicode numeral character (Ⅷ) expands to ASCII letters first, so this is
+    // where --roman sees it. Checking the whole replacement keeps the rule
+    // identical to the one applied to typed-out numerals.
+    if (roman) {
+        if (romanValue(rep)) |v| return pushRoman(l1, l2, l3, alloc, v);
+    }
     var k: usize = 0;
     while (k < rep.len) {
         if (digitAt(rep, k) != null) {
@@ -400,6 +507,9 @@ const NUM_RADIX: usize = 254;
 /// caller's tie-break, mirroring how ligatures are separated at tertiary.
 const DIGIT_STYLE_ASCII: u8 = 0;
 const DIGIT_STYLE_FOLDED: u8 = 1;
+/// A number that was written as a Roman numeral, so `IV` stays distinguishable
+/// from `4` while sorting at the same value.
+const DIGIT_STYLE_ROMAN: u8 = 2;
 
 /// Decimal value and byte length of the digit at `s[i]`, or null if there is no
 /// digit there.
@@ -940,6 +1050,7 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
     // "2026-07-29" keep working. Returns null for a plain unsigned integer, which
     // falls through to the ordinary scanner below and keeps those keys unchanged.
     const sci = options & OPT_SCIENTIFIC != 0;
+    const roman = options & OPT_ROMAN != 0;
     const decimal = options & OPT_DECIMAL != 0 or sci;
     const comma_dec = options & OPT_DECIMAL_COMMA != 0;
     // Grouping absorption belongs to OPT_DECIMAL; OPT_SCIENTIFIC only adds
@@ -982,6 +1093,34 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             }
         }
 
+        // A WHOLE token of Roman letters that parses canonically becomes a
+        // number. Scanning the maximal ASCII-letter run is what enforces
+        // "whole token": "MIXER" is one run, is not all Roman letters, and so
+        // is never considered.
+        if (roman and ((b >= 'A' and b <= 'Z') or (b >= 'a' and b <= 'z'))) {
+            var j = i;
+            while (j < s.len and ((s[j] >= 'A' and s[j] <= 'Z') or (s[j] >= 'a' and s[j] <= 'z'))) j += 1;
+            // A non-ASCII letter immediately after (café, MIXé) means the run is
+            // not the whole token, so it cannot be a numeral.
+            const whole = j >= s.len or s[j] < 0x80;
+            if (whole and romanValue(s[i..j]) != null) {
+                try pushRoman(&l1, &l2, &l3, alloc, romanValue(s[i..j]).?);
+            } else {
+                // NOT a numeral: emit the ENTIRE run as letters here. Emitting a
+                // single character and looping would let the check re-enter
+                // mid-word and match a trailing suffix — "CIVIL" would end with
+                // the number 50 and "CIVIC" with 100, inverting the two.
+                for (s[i..j]) |c| {
+                    const lt = foldLetter(c).?; // ASCII letters always fold
+                    try pushLetterPrimary(&l1, alloc, lt.base);
+                    try l2.append(alloc, WEIGHT_BASE + lt.dia);
+                    try l3.append(alloc, if (lt.upper) CASE_UPPER else CASE_LOWER);
+                }
+            }
+            i = j;
+            continue;
+        }
+
         // Natural numeric run (default-on in house style). Digits may be
         // fullwidth or Mathematical Alphanumeric forms, so the run is scanned by
         // code point rather than by byte.
@@ -1022,7 +1161,7 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             // N elements from one code point. Every level must receive the same
             // count the spelled-out form produces, or the two stop sorting
             // adjacent — which is the entire point of an expansion.
-            try emitExpansion(&l1, &l2, &l3, alloc, rep);
+            try emitExpansion(&l1, &l2, &l3, alloc, rep, roman);
         } else if (cp < 0x80 and (b > ' ')) {
             // ASCII punctuation/symbol: ordered among itself by code point.
             try l1.append(alloc, CLASS_PUNCT);
@@ -1244,6 +1383,78 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 12: --roman, ordering Roman numerals by VALUE ──
+
+test "roman: OFF by default — I V X L C D M are ordinary letters" {
+    const h: u32 = 0;
+    try expectOrder(h, "IX", "VII"); // text order: I < V
+    try expectOrder(h, "IV", "V");
+}
+
+test "roman: OPT_ROMAN orders whole-token numerals by value" {
+    const r = OPT_ROMAN;
+    try expectOrder(r, "VII", "IX"); // 7 < 9 — the flip
+    try expectOrder(r, "IV", "V"); // 4 < 5
+    try expectOrder(r, "IX", "X"); // 9 < 10
+    try expectOrder(r, "XL", "L"); // 40 < 50
+    try expectOrder(r, "XC", "C"); // 90 < 100
+    try expectOrder(r, "CD", "D"); // 400 < 500
+    try expectOrder(r, "CM", "M"); // 900 < 1000
+    try expectOrder(r, "MCMXCIV", "MMXXVI"); // 1994 < 2026
+    try expectOrder(r, "i", "iv"); // lowercase forms too
+    try expectOrder(r, "vii", "ix");
+}
+
+test "roman: embedded numerals sort by value" {
+    const r = OPT_ROMAN;
+    try expectOrder(r, "Chapter VII", "Chapter IX");
+    try expectOrder(r, "Part IV", "Part V");
+}
+
+test "roman: ONLY canonical whole tokens count" {
+    const r = OPT_ROMAN;
+    // Words built entirely from Roman letters must stay words. Each of these
+    // fails the canonical grammar, which is the whole defense.
+    for ([_][2][]const u8{
+        .{ "CIVIC", "CIVIL" }, // parse to 205 / 155, re-render as CCV / CLV — rejected
+        .{ "DID", "DIM" },
+        .{ "MIL", "MILL" },
+        .{ "LID", "LIDS" },
+    }) |pair| {
+        try expectOrder(r, pair[0], pair[1]); // plain text order preserved
+    }
+    // Non-canonical spellings are rejected: IIII stays a WORD, while IV is
+    // accepted as the number 4 — and numbers rank below letters under
+    // structural-first, so the recognized one sorts first.
+    try expectOrder(r, "IV", "IIII");
+    try testing.expect((try compareAlloc(testing.allocator, r, "IIII", "IIIJ")) < 0); // plain text
+    // Mixed case is rejected, so capitalized prose words are safe.
+    try expectOrder(r, "Mix", "Mob");
+}
+
+test "roman: 'MIX' really is 1009 — the documented ambiguity" {
+    const r = OPT_ROMAN;
+    // All-uppercase MIX parses canonically, so under --roman it IS a number.
+    // This is why the flag is opt-in rather than automatic.
+    try expectOrder(r, "M", "MIX"); // 1000 < 1009
+    try expectOrder(r, "MIX", "MX"); // 1009 < 1010
+}
+
+test "roman: Unicode numeral characters go through the expansion first" {
+    const r = OPT_ROMAN;
+    try expectOrder(r, "Ⅶ", "Ⅸ"); // Ⅶ=7 < Ⅸ=9, opposite of text order
+    try expectOrder(r, "Ⅳ", "Ⅴ");
+    try expectOrder(r, "ⅶ", "ⅸ");
+}
+
+test "roman: numerals sort among ARABIC numbers, distinguishably" {
+    const r = OPT_ROMAN;
+    try expectOrder(r, "3", "IV"); // 3 < 4
+    try expectOrder(r, "IV", "5"); // 4 < 5
+    // Same value, so a secondary style weight keeps the order total.
+    try testing.expect((try compareAlloc(testing.allocator, r, "4", "IV")) != 0);
 }
 
 // ── Phase 11: general compatibility expansion (n characters, not just 2) ──
