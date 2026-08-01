@@ -98,6 +98,14 @@ assert_order "French œ = oe"      coeur cœur cor
 assert_order "French æ = ae"      aeon æon afar
 assert_order "Dutch ĳ = ij"       ijs ĳs iks
 
+echo "── compatibility expansions beyond two letters ──"
+assert_order "Roman numeral char = its text" VII VIII Ⅷ
+assert_order "Roman numerals among themselves" Ⅰ Ⅳ Ⅷ Ⅻ
+assert_order "fraction = digit/slash/digit" 1/2 ½ 3/4
+assert_order "fraction denominators numeric" ⅑ ⅒
+assert_order "letterlike TM" TM ™ TN
+assert_order "letterlike No" No № Np
+
 echo "── Romanian letters fold to their base ──"
 assert_order "Romanian ă base a"  ăb az
 assert_order "Romanian ș base s"  șa tz

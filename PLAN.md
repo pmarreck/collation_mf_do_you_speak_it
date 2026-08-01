@@ -131,19 +131,27 @@ maintained_by: agent
       digit counted as 3 and `５` sorted after `10`. 6 new unit tests + 11 CLI
       tests. (2026-07-31 22:25 EDT)
 
-Current test count: 198 passed, 0 failed (63 Zig unit + 135 CLI integration).
+- [x] **(b) General compatibility EXPANSION.** `foldExpansion` returned exactly
+      two base letters, which could not express `Ⅷ` → `VIII` (four) or `½` →
+      `1/2` (digits plus punctuation, not letters at all). Replaced by
+      `compatExpand`, which returns replacement TEXT that `emitExpansion`
+      re-scans with the ordinary rules — so a digit run inside a replacement
+      still sorts numerically, which is why ⅑ (1/9) correctly precedes ⅒ (1/10).
+      Covers the Latin ligatures as before, Roman numeral characters
+      U+2160..2180, vulgar fractions, and ™ / № / ℅. ↁ ↂ ↇ ↈ are deliberately
+      left in CLASS_OTHER rather than given a wrong ASCII spelling.
+      Design point found the hard way: the expansion marker must live at
+      TERTIARY. Marking expanded digits at secondary broke the defining property
+      that an expansion shares primary AND secondary with its spelled-out form.
+      The `/` carries CASE_NEUTRAL_LIG instead, which suffices since every
+      fraction has one. 5 new unit tests + 6 CLI tests. (2026-08-01 02:42 EDT)
+
+Current test count: 213 passed, 0 failed (68 Zig unit + 145 CLI integration).
 
 ## Open follow-ups
 
 - [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
       — needs the host secret; see report if it required interactive sudo.
-- [ ] **(b) General compatibility EXPANSION** — next in the agreed sequence.
-      `foldExpansion` currently returns exactly two base letters, which cannot
-      express `Ⅷ` → `VIII` (four) or `½` → `1⁄2` (digits plus punctuation, not
-      letters at all). Replace it with a mechanism returning a replacement BYTE
-      STRING that the scanner re-processes, which covers both shapes and also
-      gives `™` → `TM`, `№` → `No`. Blocks: Number Forms U+2150..218F (vulgar
-      fractions + Roman numerals), Letterlike Symbols U+2100..214F.
 - [ ] **(c) `--roman`** — depends on (b). Implicit Roman-numeral sorting, opt-in
       because detection is genuinely ambiguous ("MIX" is both a word and 1009,
       "CIVIL" starts with valid Roman letters). Notes:

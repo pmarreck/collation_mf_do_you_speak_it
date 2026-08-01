@@ -100,6 +100,8 @@ const CASE_NEUTRAL: u8 = 0x02; // non-letters
 // their spelled-out forms at the tertiary level only.
 const CASE_LOWER_LIG: u8 = 0x04;
 const CASE_UPPER_LIG: u8 = 0x05;
+/// Non-letter element produced by an expansion (the `/` in `½` → `1/2`).
+const CASE_NEUTRAL_LIG: u8 = 0x06;
 
 /// A folded letter: an ASCII base ('a'..'z'), a diacritic rank, and case.
 const Letter = struct { base: u8, dia: u8, upper: bool };
@@ -241,20 +243,129 @@ fn foldLetter(cp: u21) ?Letter {
 /// consulted only after `foldLetter` misses (so the ASCII hot path pays
 /// nothing), and a future locale tailoring swaps the expansion set wholesale
 /// (German phonebook order wants ä->ae, which dictionary order must not do).
-const Expansion = struct { b0: u8, b1: u8, upper: bool };
-
-fn foldExpansion(cp: u21) ?Expansion {
+/// Compatibility expansion: one code point that collates as a SEQUENCE of other
+/// characters. Returns replacement TEXT which the key builder re-scans, rather
+/// than a fixed pair of letters — `Ⅷ` needs four letters and `½` needs digits
+/// and punctuation, neither of which a letters-only pair could express.
+///
+/// The replacement is scanned with the ordinary rules, so digit runs inside it
+/// still get natural-numeric treatment (`⅒` → `1/10` compares its 10 as ten).
+/// This is the same relation Unicode's compatibility decomposition (NFKD)
+/// defines; it is a fixed TABLE, not a dictionary, so it fits the project's
+/// no-ICU constraint.
+fn compatExpand(cp: u21) ?[]const u8 {
     return switch (cp) {
-        0x00C6 => .{ .b0 = 'a', .b1 = 'e', .upper = true }, // Æ
-        0x00E6 => .{ .b0 = 'a', .b1 = 'e', .upper = false }, // æ
-        0x0152 => .{ .b0 = 'o', .b1 = 'e', .upper = true }, // Œ
-        0x0153 => .{ .b0 = 'o', .b1 = 'e', .upper = false }, // œ
-        0x00DF => .{ .b0 = 's', .b1 = 's', .upper = false }, // ß
-        0x1E9E => .{ .b0 = 's', .b1 = 's', .upper = true }, // ẞ
-        0x0132 => .{ .b0 = 'i', .b1 = 'j', .upper = true }, // Ĳ
-        0x0133 => .{ .b0 = 'i', .b1 = 'j', .upper = false }, // ĳ
+        // ── Latin ligatures ──
+        0x00C6 => "AE", // Æ
+        0x00E6 => "ae", // æ
+        0x0152 => "OE", // Œ
+        0x0153 => "oe", // œ
+        0x00DF => "ss", // ß
+        0x1E9E => "SS", // ẞ
+        0x0132 => "IJ", // Ĳ
+        0x0133 => "ij", // ĳ
+
+        // ── Roman numeral characters, Number Forms U+2160..2182 ──
+        0x2160 => "I",
+        0x2161 => "II",
+        0x2162 => "III",
+        0x2163 => "IV",
+        0x2164 => "V",
+        0x2165 => "VI",
+        0x2166 => "VII",
+        0x2167 => "VIII",
+        0x2168 => "IX",
+        0x2169 => "X",
+        0x216A => "XI",
+        0x216B => "XII",
+        0x216C => "L",
+        0x216D => "C",
+        0x216E => "D",
+        0x216F => "M",
+        0x2170 => "i",
+        0x2171 => "ii",
+        0x2172 => "iii",
+        0x2173 => "iv",
+        0x2174 => "v",
+        0x2175 => "vi",
+        0x2176 => "vii",
+        0x2177 => "viii",
+        0x2178 => "ix",
+        0x2179 => "x",
+        0x217A => "xi",
+        0x217B => "xii",
+        0x217C => "l",
+        0x217D => "c",
+        0x217E => "d",
+        0x217F => "m",
+        0x2180 => "M", // ↀ, 1000
+        // ↁ (5000), ↂ (10000), ↇ (50000), ↈ (100000) have no ASCII spelling and
+        // are deliberately left in CLASS_OTHER rather than given a wrong one.
+
+        // ── Vulgar fractions ──
+        0x00BC => "1/4",
+        0x00BD => "1/2",
+        0x00BE => "3/4",
+        0x2150 => "1/7",
+        0x2151 => "1/9",
+        0x2152 => "1/10",
+        0x2153 => "1/3",
+        0x2154 => "2/3",
+        0x2155 => "1/5",
+        0x2156 => "2/5",
+        0x2157 => "3/5",
+        0x2158 => "4/5",
+        0x2159 => "1/6",
+        0x215A => "5/6",
+        0x215B => "1/8",
+        0x215C => "3/8",
+        0x215D => "5/8",
+        0x215E => "7/8",
+        0x2189 => "0/3",
+
+        // ── Letterlike symbols ──
+        0x2122 => "TM", // ™
+        0x2116 => "No", // №
+        0x2105 => "c/o", // ℅
+
         else => null,
     };
+}
+
+/// Emit the elements for a compatibility expansion's replacement text, using the
+/// ordinary rules so digit runs inside it still sort numerically. Every element
+/// is marked with the ligature tertiary rank, which is what keeps `ß` adjacent
+/// to `ss` while still distinguishable from it.
+///
+/// Replacements are plain ASCII by construction, so this does not recurse.
+fn emitExpansion(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, rep: []const u8) !void {
+    var k: usize = 0;
+    while (k < rep.len) {
+        if (digitAt(rep, k) != null) {
+            const run = scanDigitRun(rep, k);
+            try pushNumericPrimary(l1, alloc, rep[k..run.end]);
+            // NOT marked as expanded: an expansion is defined by having the same
+            // primary AND secondary as its spelled-out form, so the marker has
+            // to live at tertiary. The `/` carries it (CASE_NEUTRAL_LIG below),
+            // which is enough, since every fraction has one.
+            try l2.append(alloc, WEIGHT_BASE + D_NONE + run.style);
+            try l3.append(alloc, leadingZeroWeight(rep[k..run.end]));
+            k = run.end;
+            continue;
+        }
+        const c = rep[k];
+        if (foldLetter(c)) |lt| {
+            try pushLetterPrimary(l1, alloc, lt.base);
+            try l2.append(alloc, WEIGHT_BASE + lt.dia);
+            try l3.append(alloc, if (lt.upper) CASE_UPPER_LIG else CASE_LOWER_LIG);
+        } else {
+            try l1.append(alloc, CLASS_PUNCT);
+            try l1.append(alloc, c);
+            try l2.append(alloc, WEIGHT_BASE + D_NONE);
+            try l3.append(alloc, CASE_NEUTRAL_LIG);
+        }
+        k += 1;
+    }
 }
 
 /// Is this code point whitespace for structural-first purposes?
@@ -907,17 +1018,11 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             try pushLetterPrimary(&l1, alloc, lt.base);
             try l2.append(alloc, WEIGHT_BASE + lt.dia);
             try l3.append(alloc, if (lt.upper) CASE_UPPER else CASE_LOWER);
-        } else if (foldExpansion(cp)) |ex| {
-            // TWO letters from one code point. Each level must receive exactly
-            // two entries or the levels desynchronize against the spelled-out
-            // form and the ligature stops sorting adjacent to it.
-            try pushLetterPrimary(&l1, alloc, ex.b0);
-            try pushLetterPrimary(&l1, alloc, ex.b1);
-            const case: u8 = if (ex.upper) CASE_UPPER_LIG else CASE_LOWER_LIG;
-            for (0..2) |_| {
-                try l2.append(alloc, WEIGHT_BASE + D_NONE);
-                try l3.append(alloc, case);
-            }
+        } else if (compatExpand(cp)) |rep| {
+            // N elements from one code point. Every level must receive the same
+            // count the spelled-out form produces, or the two stop sorting
+            // adjacent — which is the entire point of an expansion.
+            try emitExpansion(&l1, &l2, &l3, alloc, rep);
         } else if (cp < 0x80 and (b > ' ')) {
             // ASCII punctuation/symbol: ordered among itself by code point.
             try l1.append(alloc, CLASS_PUNCT);
@@ -1139,6 +1244,61 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 11: general compatibility expansion (n characters, not just 2) ──
+
+/// Assert `single` collates exactly like `spelled` at primary+secondary, and
+/// differs only at tertiary — the defining property of an expansion.
+fn expectExpands(single: []const u8, spelled: []const u8) !void {
+    const ka = try sortKeyAlloc(testing.allocator, 0, single);
+    defer testing.allocator.free(ka);
+    const kb = try sortKeyAlloc(testing.allocator, 0, spelled);
+    defer testing.allocator.free(kb);
+    const cut = std.mem.indexOfScalar(u8, ka, SEP).? + 1;
+    const l2_end = std.mem.indexOfScalarPos(u8, ka, cut, SEP).?;
+    try testing.expectEqualSlices(u8, ka[0..l2_end], kb[0..l2_end]);
+    try testing.expect(!std.mem.eql(u8, ka, kb));
+}
+
+test "expand: Roman numeral characters expand past two letters" {
+    const h: u32 = 0;
+    try expectExpands("Ⅷ", "VIII"); // FOUR letters — the old 2-slot cap
+    try expectExpands("Ⅻ", "XII");
+    try expectExpands("Ⅳ", "IV");
+    try expectExpands("ⅷ", "viii"); // lowercase forms too
+    try expectExpands("Ⅿ", "M");
+    // ...and they order among themselves as their spelled-out text.
+    try expectOrder(h, "Ⅶ", "Ⅷ"); // VII < VIII (prefix)
+    try expectOrder(h, "Ⅳ", "Ⅸ"); // IV < IX
+}
+
+test "expand: vulgar fractions become digit/slash/digit" {
+    try expectExpands("½", "1/2");
+    try expectExpands("¾", "3/4");
+    try expectExpands("⅒", "1/10"); // a two-digit denominator
+    try expectExpands("⅝", "5/8");
+}
+
+test "expand: letterlike symbols" {
+    try expectExpands("™", "TM");
+    try expectExpands("№", "No");
+}
+
+test "expand: the existing two-letter ligatures are unchanged" {
+    const h: u32 = 0;
+    // Phase 4 behavior must survive the mechanism swap.
+    try expectExpands("ß", "ss");
+    try expectExpands("œ", "oe");
+    try expectExpands("æ", "ae");
+    try expectExpands("ĳ", "ij");
+    try expectOrder(h, "strasse", "straße");
+    try expectOrder(h, "straße", "stratos");
+}
+
+test "expand: out-of-scope code points still degrade to CLASS_OTHER" {
+    const h: u32 = 0;
+    for ([_][]const u8{ "中", "€", "Ω", "🎉" }) |c| try expectOrder(h, "zz", c);
 }
 
 // ── Phase 10: fold non-ASCII decimal digits into the numeric run ──
