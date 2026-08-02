@@ -159,7 +159,22 @@ maintained_by: agent
       number 50 and CIVIC with 100, inverting them. 7 new unit tests + 11 CLI
       tests. (2026-08-01 03:00 EDT)
 
-Current test count: 237 passed, 0 failed (75 Zig unit + 162 CLI integration).
+- [x] Quantified the --roman ambiguity against an 89,217-entry dictionary and
+      pinned the result as a set-based test (Peter asked whether requiring
+      "final reduced form" reduces ambiguity — it does, and it was already the
+      behavior). 149 entries are built only from IVXLCDM; the canonical rule
+      rejects 52 of them, i.e. nearly every multi-letter English word. Of the 97
+      survivors, 83 are genuine numerals and 14 are bare single letters, leaving
+      exactly five real-word collisions: CV DI div MD mix. Peter chose to KEEP
+      single letters as numerals so chapter lists starting at I still work.
+      Mutation testing found a real gap here: the uniform-case rule was
+      untested, because every word in the first list was already rejected by the
+      CANONICAL rule. Added mixed-case discriminators (Di, Md, Cl, Cm, Li, Ci,
+      Cd, Dix — each canonical when uppercased) plus the all-caps counterpart of
+      each, so the pair is discriminating rather than vacuous. Both rules now
+      mutation-verified. (2026-08-02 10:40 EDT)
+
+Current test count: 239 passed, 0 failed (77 Zig unit + 162 CLI integration).
 
 ## Open follow-ups
 

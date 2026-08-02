@@ -314,3 +314,39 @@ A bug worth recording, since the fix is not obvious: when a run fails to parse,
 the *entire* run must be consumed as letters. Emitting one character and looping
 lets the check re-enter mid-word and match a trailing suffix — `CIVIL` ended with
 the number 50 and `CIVIC` with 100, which inverted the two.
+
+### How much the reduced-form rule actually buys — measured
+
+Requiring **canonical (fully reduced)** spelling is not a cosmetic nicety; it is
+what makes `--roman` usable on prose. Measured against an 89,217-entry English
+dictionary:
+
+| | count | |
+|---|--:|---|
+| entries built only from `I V X L C D M` | 149 | the naive "looks Roman" filter |
+| **rejected by the canonical rule** | **52** (34%) | stay words |
+| still read as numbers | 97 (65%) | |
+
+The 52 it rejects are almost exactly the real English words:
+`civil civic did dim mild mill mimic livid vivid villi vim dill lid ill mid midi
+mic mil Cid DVD LCD LDC LCM LLD ICC DMD XML XXL`…
+
+Of the 97 that survive, **83 are genuine Roman numerals** (`ii`, `xxviii`,
+`clxvii` — dictionary entries for the numerals themselves) and **14 are bare
+single letters** (`i v x l c d m`, either case). That leaves exactly **five**
+multi-letter real-word collisions:
+
+```
+CV   DI   div   MD   mix
+```
+
+`div` is the non-obvious one: `D`(500) + `IV`(4) = 504, which re-renders as
+exactly `DIV`, so it is genuinely canonical.
+
+Bare single letters are deliberately still read as numerals, so a chapter list
+numbered `I, II, III` sorts correctly. The cost is that the pronoun `I` and a
+musical key like `C` become numbers under `--roman`; that is the documented
+trade, not an oversight.
+
+Both narrowing rules are mutation-verified: dropping the re-render check makes
+`civil` a numeral, and dropping the uniform-case check makes `Di` one.

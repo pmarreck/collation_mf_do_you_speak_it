@@ -1449,6 +1449,76 @@ test "roman: Unicode numeral characters go through the expansion first" {
     try expectOrder(r, "ⅶ", "ⅸ");
 }
 
+/// Under OPT_ROMAN, did `s` collate as a NUMBER rather than as a word? Read off
+/// the key's first primary byte, so the check is one level removed from the
+/// parser it is testing.
+fn romanCollatesAsNumber(s: []const u8) !bool {
+    const key = try sortKeyAlloc(testing.allocator, OPT_ROMAN, s);
+    defer testing.allocator.free(key);
+    return key.len > 0 and key[0] == CLASS_DIGIT;
+}
+
+test "roman: the reduced-form rule rejects real words (measured over a dictionary)" {
+    // Measured against an 89,217-entry dictionary: 149 entries are built only
+    // from IVXLCDM, and requiring CANONICAL (fully reduced) form rejects 52 of
+    // them — nearly every multi-letter English word in the set. These are a
+    // sample of that 52, pinned so the rule cannot regress silently.
+    const stay_words = [_][]const u8{
+        "civil", "civic", "did", "dim",  "mild", "mill", "mimic", "livid",
+        "vivid", "villi", "vim", "dill", "lid",  "ill",  "mid",   "midi",
+        "mic",   "mil",   "Cid", "DVD",  "LCD",  "XML",  "XXL",   "LLD",
+        "LCM",   "LDC",   "ICC", "DMD",
+    };
+    for (stay_words) |w| {
+        if (try romanCollatesAsNumber(w)) {
+            std.debug.print("wrongly read as a numeral: {s}\n", .{w});
+            return error.RomanFalsePositive;
+        }
+    }
+
+    // These are rejected by the UNIFORM-CASE rule specifically: each parses
+    // canonically once uppercased (Di=501, Md=1500, Cl=150, Cm=900, Li=51,
+    // Ci=101, Cd=400, Dix=509), so they are the only cases that can tell the
+    // case rule apart from the canonical rule. Without them, dropping the case
+    // check entirely leaves every test green — mutation testing found exactly
+    // that gap.
+    const mixed_case = [_][]const u8{ "Di", "Md", "Cl", "Cm", "Li", "Ci", "Cd", "Dix" };
+    for (mixed_case) |w| {
+        if (try romanCollatesAsNumber(w)) {
+            std.debug.print("mixed case wrongly read as a numeral: {s}\n", .{w});
+            return error.RomanMixedCaseAccepted;
+        }
+        // ...and the all-caps spelling of the same token IS a numeral, which is
+        // what makes the pair discriminating rather than vacuous.
+        var upper: [8]u8 = undefined;
+        for (w, 0..) |c, k| upper[k] = if (c >= 'a' and c <= 'z') c - 32 else c;
+        if (!try romanCollatesAsNumber(upper[0..w.len])) {
+            std.debug.print("expected all-caps {s} to be a numeral\n", .{upper[0..w.len]});
+            return error.RomanUpperRejected;
+        }
+    }
+}
+
+test "roman: the irreducible collisions, enumerated" {
+    // What survives the canonical rule: five multi-letter real words that ARE
+    // canonical numerals, plus the bare letters. `div` is the non-obvious one —
+    // D(500) + IV(4) = 504, which re-renders as exactly "DIV".
+    // Specificity corpus for the test above: without this half, a checker that
+    // rejected everything would score 100% there.
+    const are_numbers = [_][]const u8{
+        "mix", "CV",  "DI", "div", "MD",
+        "i",   "I",   "v",  "V",   "x",
+        "X",   "l",   "L",  "c",   "C",
+        "d",   "D",   "m",  "M",
+    };
+    for (are_numbers) |w| {
+        if (!try romanCollatesAsNumber(w)) {
+            std.debug.print("expected a numeral, got a word: {s}\n", .{w});
+            return error.RomanFalseNegative;
+        }
+    }
+}
+
 test "roman: numerals sort among ARABIC numbers, distinguishably" {
     const r = OPT_ROMAN;
     try expectOrder(r, "3", "IV"); // 3 < 4
