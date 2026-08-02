@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Property fuzzer for collation_mf_do_you_speak_it.
+#
+# Checks the ORDERING LAWS, not merely "does it crash" — an ordering bug never
+# crashes, so a crash-only fuzzer would sail straight past every defect this
+# library can actually have:
+#
+#   1. sort-key order == compare order   (RULES.md #3)
+#   2. keys NUL-terminated, no interior NUL (RULES.md #4)
+#   3. reflexivity   cmp(a,a) == 0
+#   4. antisymmetry  cmp(a,b) == -cmp(b,a)
+#   5. transitivity  a<=b and b<=c => a<=c
+#
+# Inputs are half structured (digits of three widths, group separators, signs,
+# Roman letters, ligatures, expansions, CJK) and half raw random bytes, so
+# invalid UTF-8 is exercised on every run.
+#
+# Usage:
+#   ./fuzz                  # default 200k iterations, fixed seed (reproducible)
+#   ./fuzz 1000000          # more iterations
+#   ./fuzz 1000000 0xBEEF   # explicit seed
+#   ./fuzz --random         # fresh seed each run; PRINTS it so a failure repros
+#
+# Per Mecha conventions: no `set -e` (it would abort on the non-zero exit that
+# signals a found defect, which is the one outcome worth reporting carefully).
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR" || exit 2
+
+ITERATIONS=200000
+SEED=12345
+
+if [[ "${1:-}" == "--random" ]]; then
+	# Deliberately NOT time-based: read the kernel CSPRNG, print it, and the run
+	# stays reproducible from the printed value.
+	SEED=$(( 0x$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n') ))
+	shift
+fi
+[[ $# -ge 1 ]] && ITERATIONS="$1"
+[[ $# -ge 2 ]] && SEED=$(( $2 ))
+
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║   collation_mf_do_you_speak_it property fuzzer                ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo "iterations : $ITERATIONS"
+echo "seed       : $SEED    (rerun exactly: ./fuzz $ITERATIONS $SEED)"
+echo ""
+
+if command -v nix >/dev/null 2>&1; then
+	FUZZ_ITERATIONS="$ITERATIONS" FUZZ_SEED="$SEED" nix develop -c zig build fuzz
+else
+	FUZZ_ITERATIONS="$ITERATIONS" FUZZ_SEED="$SEED" zig build fuzz
+fi
+rc=$?
+
+echo ""
+if [[ $rc -eq 0 ]]; then
+	echo "PASS — no ordering-law violation found."
+else
+	echo "FAIL — reproduce with: ./fuzz $ITERATIONS $SEED" >&2
+fi
+exit "$rc"

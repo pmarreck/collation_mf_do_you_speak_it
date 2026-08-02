@@ -1201,10 +1201,40 @@ pub fn compareAlloc(alloc: std.mem.Allocator, options: u32, a: []const u8, b: []
             .gt => 1,
         };
     }
+    // Build both keys in a stack scratch buffer first. Ordinary lines fit, so
+    // the common case never reaches the heap at all — which matters because
+    // `strcoll8` is the POSIX-shaped entry point callers reach for directly,
+    // outside the precompute-a-key-once model.
+    //
+    // Deliberately a scratch ALLOCATOR rather than a hand-written streaming
+    // comparator: both paths still go through the one key builder, so RULES.md
+    // #3 (sort-key order == compare order) stays true BY CONSTRUCTION. A
+    // separate streaming comparator would demote that to true-by-testing.
+    var scratch: [COMPARE_SCRATCH]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&scratch);
+    const stack = fba.allocator();
+    if (sortKeyAlloc(stack, options, a)) |ka| {
+        if (sortKeyAlloc(stack, options, b)) |kb| {
+            return orderKeys(ka, kb); // nothing to free: scratch is the stack
+        } else |_| {}
+    } else |_| {}
+
+    // At least one key outgrew the scratch (a very long line, or a huge digit
+    // run). Redo both on the heap.
     const ka = try sortKeyAlloc(alloc, options, a);
     defer alloc.free(ka);
     const kb = try sortKeyAlloc(alloc, options, b);
     defer alloc.free(kb);
+    return orderKeys(ka, kb);
+}
+
+/// Scratch large enough for both keys of an ordinary line. A key runs roughly
+/// 4x the input (three levels plus class bytes), and the intermediate level
+/// buffers grow geometrically, so this comfortably covers lines of a few hundred
+/// bytes while staying small enough to sit on a thread stack.
+const COMPARE_SCRATCH: usize = 8192;
+
+fn orderKeys(ka: []const u8, kb: []const u8) i32 {
     return switch (std.mem.order(u8, ka, kb)) {
         .lt => -1,
         .eq => 0,
@@ -1383,6 +1413,73 @@ test "numeric: long runs keep keys C-safe (no interior NUL/SEP collision)" {
     defer testing.allocator.free(key);
     try testing.expectEqual(@as(u8, TERM), key[key.len - 1]);
     for (key[0 .. key.len - 1]) |byte| try testing.expect(byte != TERM);
+}
+
+// ── Phase 13: compare without touching the heap for ordinary inputs ──
+
+test "compare: ordinary inputs never reach the allocator" {
+    // Proof rather than assertion: a FailingAllocator that permits ZERO
+    // allocations. If compareAlloc reaches the heap at all, this fails.
+    var failing = std.testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    const never = failing.allocator();
+    for ([_][2][]const u8{
+        .{ "apple", "banana" },
+        .{ "file2", "file10" },
+        .{ "Straße", "Strasse" },
+        .{ "café", "cafz" },
+        .{ "  leading space", "x" },
+        .{ "2026-08-02", "2026-08-01" },
+        .{ "a rather longer line of ordinary prose text", "a rather longer line of ordinary prose txt" },
+    }) |pair| {
+        _ = try compareAlloc(never, 0, pair[0], pair[1]);
+        _ = try compareAlloc(never, OPT_CODE_POINT, pair[0], pair[1]);
+        _ = try compareAlloc(never, OPT_DECIMAL, pair[0], pair[1]);
+    }
+    try testing.expectEqual(@as(usize, 0), failing.allocations);
+}
+
+test "compare: oversized inputs still work, via the heap fallback" {
+    // A digit run far past the stack scratch must fall back rather than fail.
+    const big_a = try numStr(testing.allocator, '1', 20_000, '7');
+    defer testing.allocator.free(big_a);
+    const big_b = try numStr(testing.allocator, '1', 20_000, '8');
+    defer testing.allocator.free(big_b);
+    try testing.expectEqual(@as(i32, -1), try compareAlloc(testing.allocator, 0, big_a, big_b));
+    try testing.expectEqual(@as(i32, 1), try compareAlloc(testing.allocator, 0, big_b, big_a));
+    try testing.expectEqual(@as(i32, 0), try compareAlloc(testing.allocator, 0, big_a, big_a));
+}
+
+test "compare: the fast path agrees with the key builder on random input" {
+    // Differential: the stack path and the heap path must never disagree. The
+    // stack path is exercised by short inputs, the heap path by long ones, so
+    // sweep both sides of the boundary.
+    var seed = std.Random.DefaultPrng.init(0xC0DEC0DE);
+    const rng = seed.random();
+    const alphabet = "abzABZ 09.,'-_é ñß½Ⅷ";
+    var buf_a: [512]u8 = undefined;
+    var buf_b: [512]u8 = undefined;
+    for ([_]u32{ 0, OPT_DECIMAL, OPT_SCIENTIFIC, OPT_ROMAN }) |opts| {
+        var trial: usize = 0;
+        while (trial < 400) : (trial += 1) {
+            const alen = rng.intRangeAtMost(usize, 0, buf_a.len);
+            const blen = rng.intRangeAtMost(usize, 0, buf_b.len);
+            for (0..alen) |k| buf_a[k] = alphabet[rng.intRangeLessThan(usize, 0, alphabet.len)];
+            for (0..blen) |k| buf_b[k] = alphabet[rng.intRangeLessThan(usize, 0, alphabet.len)];
+            const a = buf_a[0..alen];
+            const b = buf_b[0..blen];
+            // Independent recomputation straight from the key builder.
+            const ka = try sortKeyAlloc(testing.allocator, opts, a);
+            defer testing.allocator.free(ka);
+            const kb = try sortKeyAlloc(testing.allocator, opts, b);
+            defer testing.allocator.free(kb);
+            const want: i32 = switch (std.mem.order(u8, ka, kb)) {
+                .lt => -1,
+                .eq => 0,
+                .gt => 1,
+            };
+            try testing.expectEqual(want, try compareAlloc(testing.allocator, opts, a, b));
+        }
+    }
 }
 
 // ── Phase 12: --roman, ordering Roman numerals by VALUE ──

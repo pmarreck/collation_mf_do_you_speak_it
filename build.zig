@@ -76,4 +76,24 @@ pub fn build(b: *std.Build) void {
         .root_module = test_mod,
     }));
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
+
+    // ─── Property fuzzer ─────────────────────────────────────────────────
+    // Checks the ORDERING laws (key-order == compare-order, reflexivity,
+    // antisymmetry, transitivity, C-safe keys) rather than merely "does it
+    // crash" — an ordering bug never crashes. Driven by ./fuzz.
+    const fuzz_mod = b.createModule(.{
+        .root_source_file = b.path("src/fuzz.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const fuzz_exe = b.addExecutable(.{
+        .name = "collation-fuzz",
+        .root_module = fuzz_mod,
+    });
+    b.installArtifact(fuzz_exe);
+    const run_fuzz = b.addRunArtifact(fuzz_exe);
+    run_fuzz.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_fuzz.addArgs(args);
+    b.step("fuzz", "Run the collation property fuzzer").dependOn(&run_fuzz.step);
 }

@@ -174,12 +174,36 @@ maintained_by: agent
       each, so the pair is discriminating rather than vacuous. Both rules now
       mutation-verified. (2026-08-02 10:40 EDT)
 
-Current test count: 239 passed, 0 failed (77 Zig unit + 162 CLI integration).
+- [x] **Mechatron webhook** — already provisioned and working; the PLAN item was
+      stale. Every pushed commit builds green (53d2fe3 in 75s). Badge matches the
+      canonical snippet. Removed a lingering Garnix mention from flake.nix.
+      (2026-08-02 10:35 EDT)
+- [x] **Allocation-free compare.** compareAlloc now builds both keys in an 8 KiB
+      stack scratch via FixedBufferAllocator, falling back to the heap only when
+      a key outgrows it. Proven allocation-free with std.testing.FailingAllocator
+      set to permit ZERO allocations, rather than asserted. Deliberately a
+      scratch ALLOCATOR rather than a hand-written streaming comparator, so both
+      paths still run through the one key builder and RULES.md #3 stays true BY
+      CONSTRUCTION. HONEST RESULT: no measurable speedup (hyperfine, 400k
+      strcoll8 calls: 218.8ms before vs 227.7ms after, overlapping ranges) —
+      key construction dominates, so the win is the property, not throughput.
+      Early-exit streaming is where real speed would come from, and it would cost
+      the by-construction invariant. (2026-08-02 10:40 EDT)
+- [x] **`./fuzz`** — property fuzzer over 8 option sets and 3 input shapes.
+      Mutation testing of the FUZZER ITSELF found it initially near-vacuous:
+      memcmp is a total order over any bytes, so reflexivity, antisymmetry and
+      transitivity hold no matter what the key builder emits, and key-order ==
+      compare-order compares two paths through the same builder. Added properties
+      that can actually fail — structural |L2|==|L3|, plus independent numeric,
+      case-fold and expansion-adjacency oracles — and a digits-only input shape,
+      without which the numeric oracle never fired. All three injected bugs now
+      caught. 200k iterations = 1.7M property checks, clean.
+      (2026-08-02 10:50 EDT)
+
+Current test count: 242 passed, 0 failed (80 Zig unit + 162 CLI integration).
 
 ## Open follow-ups
 
-- [ ] Mechatron webhook provisioning from Thelio (`provision-mechatron-webhooks`)
-      — needs the host secret; see report if it required interactive sudo.
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and
@@ -208,8 +232,10 @@ Current test count: 239 passed, 0 failed (77 Zig unit + 162 CLI integration).
       natural-numeric ordering. That is a change to the hot loop, not just a new
       table. Recommend shipping the fullwidth block first behind the same
       opt-in-free default, and deferring the rest.
-- [ ] `strcoll8` allocates two temp keys per call; add an allocation-free
-      streaming level-by-level comparator for the common early-exit case.
+- [ ] Early-exit streaming comparator for strcoll8. The allocation is already
+      gone; the remaining win is not building whole keys when the strings differ
+      in the first element. Cost to weigh: it duplicates the key-building logic,
+      demoting RULES.md #3 from true-by-construction to true-by-testing.
 
 ## Deferred (future, noted in README Limits)
 
@@ -233,5 +259,3 @@ Current test count: 239 passed, 0 failed (77 Zig unit + 162 CLI integration).
       disambiguation is word-level, not character-level) and would blow the
       "small, no-ICU" thesis.
 - [ ] SIMD sort-key generation for throughput.
-- [ ] `./fuzz`: property-fuzz `sortKeyAlloc` — the sort-key-order ==
-      compare-order invariant must never break on random bytes.

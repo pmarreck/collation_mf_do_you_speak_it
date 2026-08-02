@@ -159,6 +159,21 @@ you want raw byte order and it's still within ~1.8× of `sort -C`.
 8N and fails on a super-linear (≥ 3×-per-doubling) regression. Measured ratios:
 1.80 / 2.04 / 2.10 — clean `O(n log n)`.
 
+## Fuzzing
+
+```sh
+./fuzz                  # 200k iterations, fixed seed (reproducible)
+./fuzz 1000000          # longer run
+./fuzz --random         # fresh seed, printed so any failure reproduces
+```
+
+Checks ORDERING laws, not crashes — a wrong order never crashes. Note that the
+algebraic laws (reflexivity, antisymmetry, transitivity) are nearly vacuous for
+a `memcmp`-based key, since `memcmp` is a total order over any bytes at all; the
+properties that can actually fail are the structural `|L2| == |L3|` level-
+alignment check and independent numeric / case-fold / expansion-adjacency
+oracles. Each is verified to catch an injected bug.
+
 ## Architecture
 
 Pure Zig core (no I/O) → C FFI (`collation_mf_*`) → C CLI that dogfoods the FFI.

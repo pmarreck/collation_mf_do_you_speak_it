@@ -38,8 +38,8 @@
 
         # NOTE: don't key on ${system} here — flake-utils.eachDefaultSystem
         # already wraps the returned attrs in ${system}. Writing
-        # `checks.${system} = ...` produces checks.<sys>.<sys>, which Garnix
-        # silently skips.
+        # `checks.${system} = ...` produces checks.<sys>.<sys>, which no CI
+        # resolves, so the targets in .mechatron-prime/targets would not exist.
         checks = {
           build = self.packages.${system}.default;
           test = pkgs.stdenv.mkDerivation {
