@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
 
     // ─── Core library module (pure Zig, no I/O) ──────────────────────────
     // Exposed for downstream Zig consumers who want to skip the C ABI.
-    _ = b.addModule("collation_mf_do_you_speak_it", .{
+    _ = b.addModule("romantic_collation", .{
         .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
 
     // ─── Static library with C ABI (the FFI boundary) ────────────────────
     const lib = b.addLibrary(.{
-        .name = "collation_mf_do_you_speak_it",
+        .name = "romantic_collation",
         .linkage = .static,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/lib.zig"),

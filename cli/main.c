@@ -1,5 +1,5 @@
 /*
- * collate — CLI front-end for collation_mf_do_you_speak_it.
+ * collate — CLI front-end for romantic_collation.
  *
  * Reads lines from stdin (or a file), sorts them via the collation FFI, and
  * writes the sorted lines to stdout. The whole point: a fast, opinionated,
@@ -20,24 +20,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "collation_mf_do_you_speak_it.h"
+#include "romantic_collation.h"
 
 #if defined(__aarch64__) || defined(_M_ARM64)
-#define CMF_ARCH "aarch64"
+#define RCOL_ARCH "aarch64"
 #elif defined(__x86_64__) || defined(_M_X64)
-#define CMF_ARCH "x86_64"
+#define RCOL_ARCH "x86_64"
 #else
-#define CMF_ARCH "unknown"
+#define RCOL_ARCH "unknown"
 #endif
 
 #if defined(__APPLE__)
-#define CMF_OS "macos"
+#define RCOL_OS "macos"
 #elif defined(__linux__)
-#define CMF_OS "linux"
+#define RCOL_OS "linux"
 #elif defined(_WIN32)
-#define CMF_OS "windows"
+#define RCOL_OS "windows"
 #else
-#define CMF_OS "unknown"
+#define RCOL_OS "unknown"
 #endif
 
 static void announce_debug_build(void) {
@@ -109,7 +109,7 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "      --lang <code>            UI language (e.g. en, de); overrides env\n"
         "\n"
         "Environment:\n"
-        "  COLLATION_MF_LANG            UI language (overrides LANG/LC_*)\n"
+        "  ROMANTIC_COLLATION_LANG      UI language (overrides LANG/LC_*)\n"
         "  COLLATE_FIELD_SEP            Default field separator (overridden by -t)\n",
     },
     [LANG_DE] = {
@@ -152,7 +152,7 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "      --lang / --sprache <code>  Anzeigesprache (z. B. en, de); überschreibt Umgebung\n"
         "\n"
         "Umgebung:\n"
-        "  COLLATION_MF_LANG            Anzeigesprache (überschreibt LANG/LC_*)\n"
+        "  ROMANTIC_COLLATION_LANG      Anzeigesprache (überschreibt LANG/LC_*)\n"
         "  COLLATE_FIELD_SEP            Standard-Feldtrenner (durch -t überschrieben)\n",
     },
 };
@@ -177,7 +177,7 @@ static int lang_from_code(const char *code, lang_t *out) {
 }
 
 /* Resolve UI language. Precedence (highest first): explicit request (--lang or
- * a localized alias) > COLLATION_MF_LANG > LC_ALL > LC_MESSAGES > LANG >
+ * a localized alias) > ROMANTIC_COLLATION_LANG > LC_ALL > LC_MESSAGES > LANG >
  * English. An unsupported EXPLICIT app request WARNs (non-fatal in prepare
  * phase; enforce phase would make it fatal) and falls back to English; ambient
  * env locales fall back SILENTLY so a foreign host locale never spams stderr. */
@@ -189,7 +189,7 @@ static lang_t resolve_lang(const char *explicit_code) {
                 explicit_code);
         return LANG_EN;
     }
-    const char *app = getenv("COLLATION_MF_LANG");
+    const char *app = getenv("ROMANTIC_COLLATION_LANG");
     if (app && app[0]) {
         if (lang_from_code(app, &lang)) return lang;
         fprintf(stderr, "collate: WARN i18n missing-locale '%s' (falling back to English)\n", app);
@@ -212,7 +212,7 @@ static int print_help(lang_t lang) {
 
 static int print_about(lang_t lang) {
     printf("collate %s (%s-%s) — %s\n",
-           collation_mf_version(), CMF_OS, CMF_ARCH, MESSAGES[lang].about_desc);
+           rcol_version(), RCOL_OS, RCOL_ARCH, MESSAGES[lang].about_desc);
     return 0;
 }
 
@@ -261,7 +261,7 @@ typedef struct {
     size_t key_len;
 } row_t;
 
-static const collation_mf_collator *g_coll; /* used by qsort comparator */
+static const rcol_collator *g_coll; /* used by qsort comparator */
 
 /* Order by sort-key memcmp; break ties by raw line bytes for determinism. */
 static int cmp_rows(const void *pa, const void *pb) {
@@ -356,7 +356,7 @@ static int cmd_sort(const char *path, uint32_t options,
         return 1;
     }
 
-    collation_mf_collator *coll = collation_mf_open(options);
+    rcol_collator *coll = rcol_open(options);
     if (!coll) {
         free(rows);
         free(data);
@@ -387,7 +387,7 @@ static int cmd_sort(const char *path, uint32_t options,
                 fputs("collate: out of memory\n", stderr);
                 break;
             }
-            size_t need = collation_mf_get_sort_key(coll, ksrc, ksrc_len, key, cap);
+            size_t need = rcol_get_sort_key(coll, ksrc, ksrc_len, key, cap);
             if (need > cap) {
                 uint8_t *nk = (uint8_t *)realloc(key, need);
                 if (!nk) {
@@ -397,7 +397,7 @@ static int cmd_sort(const char *path, uint32_t options,
                     break;
                 }
                 key = nk;
-                need = collation_mf_get_sort_key(coll, ksrc, ksrc_len, key, need);
+                need = rcol_get_sort_key(coll, ksrc, ksrc_len, key, need);
             }
             rows[idx].line = line;
             rows[idx].line_len = line_len;
@@ -417,7 +417,7 @@ static int cmd_sort(const char *path, uint32_t options,
     }
 
     for (size_t k = 0; k < idx; k++) free(rows[k].key);
-    collation_mf_close(coll);
+    rcol_close(coll);
     free(rows);
     free(data);
     return exit_code;
@@ -468,20 +468,20 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(a, "--sprache=", 10) == 0) {
                 lang_code = a + 10;
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
-                options |= COLLATION_MF_CODE_POINT;
+                options |= RCOL_CODE_POINT;
             } else if (strcmp(a, "-d") == 0 || strcmp(a, "--decimal") == 0
                        || strcmp(a, "--decimals") == 0 || strcmp(a, "--dec") == 0) {
-                options |= COLLATION_MF_DECIMAL;
-                options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                options |= RCOL_DECIMAL;
+                options &= ~(uint32_t)RCOL_DECIMAL_COMMA;
             } else if (strcmp(a, "-s") == 0 || strcmp(a, "--scientific") == 0
                        || strcmp(a, "--sci") == 0) {
-                options |= COLLATION_MF_SCIENTIFIC;
+                options |= RCOL_SCIENTIFIC;
             } else if (strcmp(a, "--roman") == 0) {
-                options |= COLLATION_MF_ROMAN;
+                options |= RCOL_ROMAN;
             } else if (strcmp(a, "-n") == 0 || strcmp(a, "--numeric") == 0
                        || strcmp(a, "--num") == 0) {
-                options |= COLLATION_MF_SCIENTIFIC | COLLATION_MF_DECIMAL;
-                options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                options |= RCOL_SCIENTIFIC | RCOL_DECIMAL;
+                options &= ~(uint32_t)RCOL_DECIMAL_COMMA;
             } else if (strncmp(a, "--scientific=", 13) == 0
                        || strncmp(a, "--sci=", 6) == 0
                        || strncmp(a, "--numeric=", 10) == 0
@@ -489,12 +489,12 @@ int main(int argc, char *argv[]) {
                 /* Same SEP grammar as --decimal; --numeric also turns on
                  * digit-group absorption, --scientific does not. */
                 const char *sep = strchr(a, '=') + 1;
-                options |= COLLATION_MF_SCIENTIFIC;
-                if (a[2] == 'n') options |= COLLATION_MF_DECIMAL;
+                options |= RCOL_SCIENTIFIC;
+                if (a[2] == 'n') options |= RCOL_DECIMAL;
                 if (strcmp(sep, ".") == 0) {
-                    options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                    options &= ~(uint32_t)RCOL_DECIMAL_COMMA;
                 } else if (strcmp(sep, ",") == 0) {
-                    options |= COLLATION_MF_DECIMAL_COMMA;
+                    options |= RCOL_DECIMAL_COMMA;
                 } else {
                     fprintf(stderr,
                             "collate: decimal separator must be '.' or ',' "
@@ -508,10 +508,10 @@ int main(int argc, char *argv[]) {
                  * the positional FILE argument. */
                 const char *sep = strchr(a, '=') + 1;
                 if (strcmp(sep, ".") == 0) {
-                    options |= COLLATION_MF_DECIMAL;
-                    options &= ~(uint32_t)COLLATION_MF_DECIMAL_COMMA;
+                    options |= RCOL_DECIMAL;
+                    options &= ~(uint32_t)RCOL_DECIMAL_COMMA;
                 } else if (strcmp(sep, ",") == 0) {
-                    options |= COLLATION_MF_DECIMAL | COLLATION_MF_DECIMAL_COMMA;
+                    options |= RCOL_DECIMAL | RCOL_DECIMAL_COMMA;
                 } else {
                     fprintf(stderr,
                             "collate: --decimal separator must be '.' or ',' "
@@ -521,7 +521,7 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(a, "--version-sort") == 0) {
                 /* The explicit form of the default. Present so a later argument
                  * can override an earlier --decimal, per the CLI convention. */
-                options &= ~(uint32_t)COLLATION_MF_DECIMAL;
+                options &= ~(uint32_t)RCOL_DECIMAL;
             } else if (strcmp(a, "--field-separator") == 0) {
                 if (i + 1 >= argc) {
                     fputs("collate: --field-separator requires an argument\n", stderr);
@@ -591,7 +591,7 @@ int main(int argc, char *argv[]) {
     lang_t lang = resolve_lang(lang_code ? lang_code : inferred_lang);
     if (want_help) return print_help(lang);
     if (want_version) {
-        printf("%s\n", collation_mf_version());
+        printf("%s\n", rcol_version());
         return 0;
     }
     if (want_about) return print_about(lang);

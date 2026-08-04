@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Integration test: i18n groundwork (PREPARE phase) for --help/--about.
-#   --lang <code> + COLLATION_MF_LANG override LANG/LC_*; English is the
+#   --lang <code> + ROMANTIC_COLLATION_LANG override LANG/LC_*; English is the
 #   default/fallback. Localized aliases: --hilfe (German help), --sprache
 #   (German alias for --lang). Only en + de exist in prepare phase; unsupported
 #   locales WARN (non-fatal) and fall back to English.
 #
-# The environment is scrubbed of LANG/LC_*/COLLATION_MF_LANG per case so an
+# The environment is scrubbed of LANG/LC_*/ROMANTIC_COLLATION_LANG per case so an
 # ambient locale on the test host cannot perturb results.
 set -u
 
@@ -16,7 +16,7 @@ CLI="$REPO_ROOT/zig-out/bin/collate"
 if [[ ! -x "$CLI" ]]; then echo "FAIL: CLI not built; run ./build" >&2; exit 1; fi
 
 # Run collate with a fully-scrubbed locale environment plus any KEY=VAL prefixes.
-run() { env -u LANG -u LC_ALL -u LC_MESSAGES -u LANGUAGE -u COLLATION_MF_LANG "$@"; }
+run() { env -u LANG -u LC_ALL -u LC_MESSAGES -u LANGUAGE -u ROMANTIC_COLLATION_LANG "$@"; }
 
 PASS=0
 FAIL=0
@@ -45,17 +45,17 @@ want_contains "--lang de about is German" "Sortierung" "$out"
 out=$(run "$CLI" --lang=de --about 2>/dev/null)
 want_contains "--lang=de attached form" "Sortierung" "$out"
 
-# ── COLLATION_MF_LANG=de => German ──
-out=$(run COLLATION_MF_LANG=de "$CLI" --about 2>/dev/null)
-want_contains "COLLATION_MF_LANG=de about is German" "Sortierung" "$out"
+# ── ROMANTIC_COLLATION_LANG=de => German ──
+out=$(run ROMANTIC_COLLATION_LANG=de "$CLI" --about 2>/dev/null)
+want_contains "ROMANTIC_COLLATION_LANG=de about is German" "Sortierung" "$out"
 
-# ── --lang overrides COLLATION_MF_LANG (en beats de) ──
-out=$(run COLLATION_MF_LANG=de "$CLI" --lang en --about 2>/dev/null)
-want_contains "--lang en overrides COLLATION_MF_LANG=de" "opinionated" "$out"
+# ── --lang overrides ROMANTIC_COLLATION_LANG (en beats de) ──
+out=$(run ROMANTIC_COLLATION_LANG=de "$CLI" --lang en --about 2>/dev/null)
+want_contains "--lang en overrides ROMANTIC_COLLATION_LANG=de" "opinionated" "$out"
 
-# ── COLLATION_MF_LANG overrides LANG (project env beats ambient) ──
-out=$(run LANG=en_US.UTF-8 COLLATION_MF_LANG=de "$CLI" --about 2>/dev/null)
-want_contains "COLLATION_MF_LANG beats LANG" "Sortierung" "$out"
+# ── ROMANTIC_COLLATION_LANG overrides LANG (project env beats ambient) ──
+out=$(run LANG=en_US.UTF-8 ROMANTIC_COLLATION_LANG=de "$CLI" --about 2>/dev/null)
+want_contains "ROMANTIC_COLLATION_LANG beats LANG" "Sortierung" "$out"
 
 # ── ambient LANG selects the locale when no app request ──
 out=$(run LANG=de_DE.UTF-8 "$CLI" --about 2>/dev/null)

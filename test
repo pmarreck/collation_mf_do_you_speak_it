@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Master test runner for collation_mf_do_you_speak_it.
+# Master test runner for romantic_collation.
 # Runs Zig unit tests + CLI integration tests.
 # Exit code = total number of failures across all suites.
 #
@@ -36,7 +36,7 @@ run_suite() {
 }
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   collation_mf_do_you_speak_it Master Test Suite             ║"
+echo "║   romantic_collation Master Test Suite                       ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 # Build first (ReleaseFast for CLI tests; nix-sandboxed).

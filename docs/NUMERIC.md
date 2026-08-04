@@ -1,5 +1,5 @@
 ---
-purpose: How numeric collation works in collation_mf_do_you_speak_it — the technique, what it buys, and exactly where it is wrong
+purpose: How numeric collation works in romantic_collation — the technique, what it buys, and exactly where it is wrong
 audience: both
 maintained_by: agent
 ---

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Property fuzzer for collation_mf_do_you_speak_it.
+# Property fuzzer for romantic_collation.
 #
 # Checks the ORDERING LAWS, not merely "does it crash" — an ordering bug never
 # crashes, so a crash-only fuzzer would sail straight past every defect this
@@ -41,7 +41,7 @@ fi
 [[ $# -ge 2 ]] && SEED=$(( $2 ))
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   collation_mf_do_you_speak_it property fuzzer                ║"
+echo "║   romantic_collation property fuzzer                         ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo "iterations : $ITERATIONS"
 echo "seed       : $SEED    (rerun exactly: ./fuzz $ITERATIONS $SEED)"

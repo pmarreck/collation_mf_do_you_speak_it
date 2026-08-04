@@ -1,5 +1,5 @@
 .{
-    .name = .collation_mf_do_you_speak_it,
+    .name = .romantic_collation,
     .version = "0.1.0",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
@@ -10,7 +10,7 @@
         "include",
         "cli",
     },
-    // Zig-suggested fingerprint for package name `.collation_mf_do_you_speak_it`.
+    // Zig-suggested fingerprint for package name `.romantic_collation`.
     // Lower 32 bits = hash of the name; upper 32 bits = random per-package.
-    .fingerprint = 0xaf0e76de46da2763,
+    .fingerprint = 0xccb4f63ec69326af,
 }

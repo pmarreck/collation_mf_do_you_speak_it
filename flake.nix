@@ -1,5 +1,5 @@
 {
-  description = "collation_mf_do_you_speak_it — fast, opinionated, reproducible string collation that ignores the OS locale";
+  description = "romantic_collation — fast, opinionated, reproducible string collation that ignores the OS locale";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -17,7 +17,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        pname = "collation_mf_do_you_speak_it";
+        pname = "romantic_collation";
         version = "0.1.0";
         # Pinned to 0.16.0 ("Juicy Main", April 2026).
         zigPkg = zig-overlay.packages.${system}."0.16.0";

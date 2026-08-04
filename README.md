@@ -1,12 +1,12 @@
-# collation_mf_do_you_speak_it
+# romantic_collation
 
-[![Mechatron Prime CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fthelio-nixos.tail66c90.ts.net%2Fbadges%2Fcollation_mf_do_you_speak_it.json&style=for-the-badge)](https://thelio-nixos.tail66c90.ts.net/mechatron-prime/)
+[![Mechatron Prime CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fthelio-nixos.tail66c90.ts.net%2Fbadges%2Fromantic_collation.json&style=for-the-badge)](https://thelio-nixos.tail66c90.ts.net/mechatron-prime/)
 
 A small, **fast**, **opinionated**, cross-platform, **reproducible** string
 collation / sorting library that ships its own versioned ordering and **ignores
 the OS locale entirely**.
 
-> Collation, motherf***er — do you speak it?
+> Yes, it's a pun on the Romance languages. They sort correctly here.
 
 ## Why
 
@@ -111,7 +111,7 @@ printf 'a:3\nb:1\nc:2\n' | collate -t: -k2
 ### Language (`--lang`, prepare-phase i18n)
 
 `--help`/`--about` are localizable. Precedence: `--lang <code>` overrides
-`COLLATION_MF_LANG`, which overrides `LANG`/`LC_*`; English is the default and
+`ROMANTIC_COLLATION_LANG`, which overrides `LANG`/`LC_*`; English is the default and
 fallback. Today only `en` and a `de` demonstration locale ship (full coverage is
 future work). Localized aliases: `--hilfe` (German help), `--sprache` (= `--lang`).
 
@@ -119,17 +119,17 @@ future work). Localized aliases: `--hilfe` (German help), `--sprache` (= `--lang
 
 The C surface mirrors ICU4C's `ucol_*` collator API, but is UTF-8-native
 (byte string + length, like `ucol_strcollUTF8`). See
-[`include/collation_mf_do_you_speak_it.h`](include/collation_mf_do_you_speak_it.h).
+[`include/romantic_collation.h`](include/romantic_collation.h).
 
 ```c
-collation_mf_collator *c = collation_mf_open(0); /* 0 = house style */
-int r = collation_mf_strcoll8(c, a, alen, b, blen);      /* -1 / 0 / +1 */
-size_t n = collation_mf_get_sort_key(c, s, slen, out, cap); /* memcmp == strcoll8 */
-collation_mf_close(c);
+rcol_collator *c = rcol_open(0); /* 0 = house style */
+int r = rcol_strcoll8(c, a, alen, b, blen);      /* -1 / 0 / +1 */
+size_t n = rcol_get_sort_key(c, s, slen, out, cap); /* memcmp == strcoll8 */
+rcol_close(c);
 ```
 
-Plus POSIX-shaped drop-ins: `collation_mf_strcoll(a, b)` and
-`collation_mf_strxfrm(dst, src, n)`.
+Plus POSIX-shaped drop-ins: `rcol_strcoll(a, b)` and
+`rcol_strxfrm(dst, src, n)`.
 
 ## Benchmarks
 
@@ -176,7 +176,7 @@ oracles. Each is verified to catch an injected bug.
 
 ## Architecture
 
-Pure Zig core (no I/O) → C FFI (`collation_mf_*`) → C CLI that dogfoods the FFI.
+Pure Zig core (no I/O) → C FFI (`rcol_*`) → C CLI that dogfoods the FFI.
 See [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) and [RULES.md](RULES.md).
 
 ## Limits (v1)
@@ -247,7 +247,7 @@ landed after `z` by virtue of being unrecognized.
 
 The CLI binary is provisionally named **`collate`** — a single clean word. It can
 be renamed without touching the library (the library symbols are
-`collation_mf_*`).
+`rcol_*`).
 
 ## License
 

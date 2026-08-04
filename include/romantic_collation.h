@@ -1,5 +1,5 @@
 /*
- * collation_mf_do_you_speak_it — public C FFI header.
+ * romantic_collation — public C FFI header.
  *
  * A fast, opinionated, reproducible string-collation library that IGNORES the
  * OS locale entirely and ships its own versioned ordering. The C surface is
@@ -12,8 +12,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef COLLATION_MF_DO_YOU_SPEAK_IT_H
-#define COLLATION_MF_DO_YOU_SPEAK_IT_H
+#ifndef ROMANTIC_COLLATION_H
+#define ROMANTIC_COLLATION_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-/* ── Options bitmask (passed to collation_mf_open) ─────────────────────────
+/* ── Options bitmask (passed to rcol_open) ─────────────────────────────────
  *
  * The default (options == 0) is the OPINIONATED HOUSE STYLE:
  *   - structural-first: whitespace < punctuation < digits < letters
@@ -34,15 +34,15 @@ extern "C" {
 
 /* Pure UTF-8 byte / code-point order (== `LC_ALL=C sort`). The escape hatch.
  * When set, all other option bits are ignored. */
-#define COLLATION_MF_CODE_POINT     (1u << 0)
+#define RCOL_CODE_POINT     (1u << 0)
 
 /* Reserved for future use. Natural numeric runs are ON by default in house
  * style; this bit will let a caller disable them. v1: no-op. */
-#define COLLATION_MF_NUMERIC        (1u << 1)
+#define RCOL_NUMERIC        (1u << 1)
 
 /* Reserved for future use. Case is a final tie-break by default; this bit
  * will promote case to a primary distinction. v1: no-op. */
-#define COLLATION_MF_CASE_SENSITIVE (1u << 2)
+#define RCOL_CASE_SENSITIVE (1u << 2)
 
 /* Read the first `.` of a LEADING number as a decimal point (1.10 < 1.9)
  * instead of a separator. OFF by default: dotted numbers in the wild are
@@ -51,9 +51,9 @@ extern "C" {
  * which is why coreutils ships `-n`, `-V` and `-g` separately rather than
  * unifying them. Applies at offset 0 of the collated string only, so
  * "peter-3" and "v1.9" keep separator semantics either way. */
-#define COLLATION_MF_DECIMAL        (1u << 3)
+#define RCOL_DECIMAL        (1u << 3)
 
-/* With COLLATION_MF_DECIMAL, ',' is the decimal separator and '.' groups digits
+/* With RCOL_DECIMAL, ',' is the decimal separator and '.' groups digits
  * (continental convention) rather than the reverse. Ignored without DECIMAL.
  *
  * This is a DECLARATION by the caller, never an inference from the data: `1.234`
@@ -66,16 +66,16 @@ extern "C" {
  * the number whenever it sits BETWEEN two digits. Absorption is group-SIZE
  * agnostic, so Indian 2-2-3 (12,34,567) and Chinese 4-grouping (1,2345,6789)
  * both work. */
-#define COLLATION_MF_DECIMAL_COMMA  (1u << 4)
+#define RCOL_DECIMAL_COMMA  (1u << 4)
 
 /* Recognize scientific notation (1.5e10, 2E-5, 1e+3) and order by VALUE.
  * Every number is normalized to (exponent, mantissa) form — including ones with
  * no explicit exponent, which are simply exponent 0 — so a list mixing `1234`
  * and `2e5` orders correctly rather than being undefined.
  *
- * Independent of COLLATION_MF_DECIMAL: this bit adds exponents, DECIMAL adds
+ * Independent of RCOL_DECIMAL: this bit adds exponents, DECIMAL adds
  * digit-group absorption. Setting both is what `--numeric` does. */
-#define COLLATION_MF_SCIENTIFIC     (1u << 5)
+#define RCOL_SCIENTIFIC     (1u << 5)
 
 /* Order whole-token Roman numerals by VALUE (VII < IX) rather than as text.
  * Opt-in because detection is irreducibly ambiguous: "MIX" is a real word AND a
@@ -83,17 +83,17 @@ extern "C" {
  * uniform case qualify, which rejects "CIVIL", "DID", "IIII" and "Mix".
  * A recognized numeral becomes a numeric element, so IV sorts between 3 and 5
  * and therefore below every letter, per the structural-first rule. */
-#define COLLATION_MF_ROMAN          (1u << 6)
+#define RCOL_ROMAN          (1u << 6)
 
 /* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
 
-#define COLLATION_MF_LESS     (-1)
-#define COLLATION_MF_EQUAL      0
-#define COLLATION_MF_GREATER    1
+#define RCOL_LESS     (-1)
+#define RCOL_EQUAL      0
+#define RCOL_GREATER    1
 
 /* ── Opaque collator handle (analog of ICU's UCollator) ────────────────── */
 
-typedef struct collation_mf_collator collation_mf_collator;
+typedef struct rcol_collator rcol_collator;
 
 /* ── Public API ────────────────────────────────────────────────────────── */
 
@@ -101,33 +101,33 @@ typedef struct collation_mf_collator collation_mf_collator;
  * Return the library version as a NUL-terminated string (e.g. "0.1.0").
  * Pointer is statically allocated; do not free.
  */
-const char *collation_mf_version(void);
+const char *rcol_version(void);
 
 /**
  * Open a collator for the given options bitmask (analog of `ucol_open`).
  * There is no locale string in v1 — the opinionated root order is the only
- * order. Returns NULL on allocation failure. Free with collation_mf_close.
+ * order. Returns NULL on allocation failure. Free with rcol_close.
  */
-collation_mf_collator *collation_mf_open(uint32_t options);
+rcol_collator *rcol_open(uint32_t options);
 
 /**
- * Close/free a collator returned by collation_mf_open. NULL-safe.
+ * Close/free a collator returned by rcol_open. NULL-safe.
  */
-void collation_mf_close(collation_mf_collator *coll);
+void rcol_close(rcol_collator *coll);
 
 /**
  * Compare two UTF-8 byte strings (analog of `ucol_strcollUTF8`).
- * Returns COLLATION_MF_LESS / _EQUAL / _GREATER (-1 / 0 / 1).
+ * Returns RCOL_LESS / _EQUAL / _GREATER (-1 / 0 / 1).
  */
-int collation_mf_strcoll8(
-    const collation_mf_collator *coll,
+int rcol_strcoll8(
+    const rcol_collator *coll,
     const uint8_t *a, size_t alen,
     const uint8_t *b, size_t blen
 );
 
 /**
  * Write a binary sort key for `s` into `out` (analog of `ucol_getSortKey`).
- * The key's `memcmp` order equals `collation_mf_strcoll8` order — precompute
+ * The key's `memcmp` order equals `rcol_strcoll8` order — precompute
  * once, compare many. The key is NUL-terminated and contains no interior NUL,
  * so C callers may compare with `strcmp`/`memcmp`.
  *
@@ -136,8 +136,8 @@ int collation_mf_strcoll8(
  * length tells the caller how large a buffer to allocate for a full retry.
  * `out` may be NULL when `out_cap` is 0 (length-probe call).
  */
-size_t collation_mf_get_sort_key(
-    const collation_mf_collator *coll,
+size_t rcol_get_sort_key(
+    const rcol_collator *coll,
     const uint8_t *s, size_t slen,
     uint8_t *out, size_t out_cap
 );
@@ -148,7 +148,7 @@ size_t collation_mf_get_sort_key(
  * Drop-in analog of C `strcoll`: compare two NUL-terminated UTF-8 strings
  * using the default house-style order. Returns -1 / 0 / 1.
  */
-int collation_mf_strcoll(const char *a, const char *b);
+int rcol_strcoll(const char *a, const char *b);
 
 /**
  * Drop-in analog of C `strxfrm`: transform `src` into a sort key written to
@@ -156,10 +156,10 @@ int collation_mf_strcoll(const char *a, const char *b);
  * options. Returns the length the full key needs (excluding the trailing NUL),
  * matching `strxfrm` semantics. `dst` may be NULL when `n` is 0.
  */
-size_t collation_mf_strxfrm(char *dst, const char *src, size_t n);
+size_t rcol_strxfrm(char *dst, const char *src, size_t n);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* COLLATION_MF_DO_YOU_SPEAK_IT_H */
+#endif /* ROMANTIC_COLLATION_H */

@@ -1,5 +1,5 @@
 ---
-purpose: Invariants that must always hold for collation_mf_do_you_speak_it
+purpose: Invariants that must always hold for romantic_collation
 audience: agent
 maintained_by: human
 ---
@@ -25,16 +25,16 @@ changing one changes the *product*, not just an implementation detail.
 
 ## Correctness invariants
 
-3. **Sort-key order == compare order.** `collation_mf_get_sort_key` must produce
+3. **Sort-key order == compare order.** `rcol_get_sort_key` must produce
    a key whose `memcmp`/lexicographic order is identical to
-   `collation_mf_strcoll8` for the same collator. This is enforced by
+   `rcol_strcoll8` for the same collator. This is enforced by
    construction (compare is defined via the key builder) and property-tested
    over random strings. Never let them diverge.
 
 4. **Sort keys are C-safe.** House-style keys are NUL-terminated and contain no
    interior NUL byte, so C callers may compare with `strcmp`/`memcmp`.
 
-5. **Code-point mode == `LC_ALL=C sort`.** With `COLLATION_MF_CODE_POINT`, the
+5. **Code-point mode == `LC_ALL=C sort`.** With `RCOL_CODE_POINT`, the
    order is exactly pure UTF-8 byte order. This is the escape hatch and the
    simplest correct baseline; it is differentially tested against coreutils
    `LC_ALL=C sort`.
@@ -44,7 +44,7 @@ changing one changes the *product*, not just an implementation detail.
 6. **Pure core, no I/O.** `src/collation.zig` performs no I/O and reads no
    globals. All I/O lives in the CLI.
 
-7. **The CLI dogfoods the FFI.** `cli/main.c` calls the `collation_mf_*` C
+7. **The CLI dogfoods the FFI.** `cli/main.c` calls the `rcol_*` C
    symbols; it never bypasses them. (It is written in C precisely so it *cannot*
    import the Zig core directly — the bypass is inexpressible.)
 
@@ -68,5 +68,5 @@ changing one changes the *product*, not just an implementation detail.
   English). Only `en` + a `de` demonstration locale exist today. Full 50-locale
   coverage and compile/test enforcement are DEFERRED to the enforce phase (when
   the CLI surface stabilizes). See the i18n skill for the enforce checklist.
-- Precedence (highest first): `--lang <code>` / localized alias → `COLLATION_MF_LANG`
+- Precedence (highest first): `--lang <code>` / localized alias → `ROMANTIC_COLLATION_LANG`
   → `LC_ALL` → `LC_MESSAGES` → `LANG` → English.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark suite for collation_mf_do_you_speak_it.
+# Benchmark suite for romantic_collation.
 #
 # Two parts:
 #   A) COMPARISON — wall-clock (hyperfine, median of N) of `collate` (house
@@ -47,7 +47,7 @@ NDJSON="$SCRIPT_DIR/bench/${machine_id}.ndjson"
 now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  collation_mf benchmark — machine ${machine_id}                     "
+echo "║  romantic_collation benchmark — machine ${machine_id}                     "
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo "CPU: $cpu_model"
 echo "corpus N=$BM_N  seed=$BM_SEED  warmup=$WARMUP"
@@ -147,7 +147,7 @@ printf '%-34s %12s %12s %10s\n' "----------" "----------" "-------" "--------"
 # Ensure ndjson has a self-describing header.
 if [ ! -f "$NDJSON" ]; then
 	mkdir -p "$SCRIPT_DIR/bench"
-	printf '{"_meta":"collation_mf benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"%s","cpu":%s,"schema":1,"generated_by":"./bm"}\n' \
+	printf '{"_meta":"romantic_collation benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"%s","cpu":%s,"schema":1,"generated_by":"./bm"}\n' \
 		"$machine_id" "$(printf '%s' "$cpu_model" | luajit -e 'io.write(string.format("%q", io.read("*a")))' 2>/dev/null || echo "\"$cpu_model\"")" \
 		>> "$NDJSON"
 	seeded=1

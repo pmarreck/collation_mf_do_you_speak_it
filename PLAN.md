@@ -1,10 +1,10 @@
 ---
-purpose: Work plan and roadmap for collation_mf_do_you_speak_it
+purpose: Work plan and roadmap for romantic_collation
 audience: agent
 maintained_by: agent
 ---
 
-# PLAN — collation_mf_do_you_speak_it
+# PLAN — romantic_collation
 
 ## Done (v0.1.0 + follow-ups)
 
@@ -21,7 +21,7 @@ maintained_by: agent
       `COLLATE_FIELD_SEP` env; extraction in the C CLI (Zig core stays
       field-agnostic). 11 integration tests. (2026-07-24)
 - [x] i18n groundwork (PREPARE phase): typed message table (en + de demo),
-      `--lang`/`COLLATION_MF_LANG`/`LC_*` precedence, English fallback,
+      `--lang`/`ROMANTIC_COLLATION_LANG`/`LC_*` precedence, English fallback,
       localized aliases `--hilfe`/`--sprache`. 16 integration tests. Decision
       recorded in RULES.md. (2026-07-24)
 - [x] Mechatron Prime CI: `.mechatron-prime/targets` (packages.default +
@@ -245,9 +245,9 @@ Current test count: 242 passed, 0 failed (80 Zig unit + 162 CLI integration).
 - [ ] Full Unicode normalization: fold DECOMPOSED combining-mark sequences to
       equal precomposed forms (v1 folds only precomposed Latin).
 - [ ] Broaden diacritic coverage beyond Latin-1 + common Latin Extended-A.
-- [ ] Wire the reserved option bits (`COLLATION_MF_NUMERIC`,
-      `COLLATION_MF_CASE_SENSITIVE`) to actually toggle behavior.
-- [ ] Optional locale tailoring: a real `collation_mf_open_locale`. (This is the
+- [ ] Wire the reserved option bits (`RCOL_NUMERIC`,
+      `RCOL_CASE_SENSITIVE`) to actually toggle behavior.
+- [ ] Optional locale tailoring: a real `rcol_open_locale`. (This is the
       architectural hook CJK would need — ICU calls it "tailoring"; it is a
       per-locale reordering layer, not more rows in `foldLetter`.)
 - [ ] Optional table-only CJK tier behind a build flag (keeps the default binary

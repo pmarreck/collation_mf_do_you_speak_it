@@ -1,10 +1,10 @@
 ---
-purpose: Ultimate goals and terminology for collation_mf_do_you_speak_it
+purpose: Ultimate goals and terminology for romantic_collation
 audience: both
 maintained_by: agent
 ---
 
-# collation_mf_do_you_speak_it — Project Overview
+# romantic_collation — Project Overview
 
 ## The one-sentence goal
 
@@ -32,13 +32,13 @@ everywhere. If you want the raw escape hatch, `--code-point` gives you exact
 ## Architecture (hexagonal / ports-and-adapters)
 
 ```
-any consumer ──► C FFI (collation_mf_*) ──► pure Zig core (no I/O)
+any consumer ──► C FFI (rcol_*) ──► pure Zig core (no I/O)
                      ▲
               C CLI `collate` dogfoods the same FFI
 ```
 
 - **Pure Zig core** (`src/collation.zig`): all logic, no I/O. Builds sort keys.
-- **C FFI** (`src/lib.zig` + `include/collation_mf_do_you_speak_it.h`): the real
+- **C FFI** (`src/lib.zig` + `include/romantic_collation.h`): the real
   public API, modeled on ICU4C's `ucol_*` surface but UTF-8-native.
 - **C CLI** (`cli/main.c`): the `collate` command, which calls *through* the FFI
   (not the Zig core directly) so the FFI boundary is exercised.
@@ -54,7 +54,7 @@ any consumer ──► C FFI (collation_mf_*) ──► pure Zig core (no I/O)
   are NOT ignored (the deliberate deviation from the Unicode Collation
   Algorithm, which makes punctuation ignorable). Yields "space before letters"
   and "shorter-prefix-before-longer".
-- **Code-point mode**: the escape hatch (`COLLATION_MF_CODE_POINT`) = pure UTF-8
+- **Code-point mode**: the escape hatch (`RCOL_CODE_POINT`) = pure UTF-8
   byte order = `LC_ALL=C sort`.
 - **Collation element**: one unit of comparison — a folded letter, a digit run,
   a whitespace char, a punctuation char, or an "other" code point.
@@ -63,8 +63,8 @@ any consumer ──► C FFI (collation_mf_*) ──► pure Zig core (no I/O)
 
 ## Naming conventions
 
-- Zig package/module/static-lib: `collation_mf_do_you_speak_it`
-- C FFI symbol prefix: `collation_mf_`
-- C header: `include/collation_mf_do_you_speak_it.h`
+- Zig package/module/static-lib: `romantic_collation`
+- C FFI symbol prefix: `rcol_`
+- C header: `include/romantic_collation.h`
 - CLI binary (hyphenated): `collate` (provisional — see README for rename note)
 - Default git branch: `yolo`

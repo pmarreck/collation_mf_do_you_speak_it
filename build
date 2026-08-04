@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build collation_mf_do_you_speak_it.
+# Build romantic_collation.
 # Defaults to ReleaseFast via `nix build` (sandboxed, deterministic).
 # `./build --debug` for a debug build (uses bare zig build).
 set -uo pipefail

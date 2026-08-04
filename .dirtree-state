@@ -25,12 +25,12 @@ annotate=[
 	flake.nix = Nix flake: Zig pinned via mitchellh/zig-overlay; packages.default + checks.build/test + dev shell (hyperfine, ICU, luajit)
 	fuzz = ./fuzz — property fuzzer driver; checks ORDERING laws (level alignment, numeric/case/expansion oracles) not just crashes; prints its seed so any failure reproduces exactly
 	include = Public C API header (the real public interface)
-	include/collation_mf_do_you_speak_it.h = Public C FFI header, modeled on ICU4C ucol_* but UTF-8 bytes+len; option bits (CODE_POINT/NUMERIC/CASE_SENSITIVE/DECIMAL)
+	include/romantic_collation.h = Public C FFI header, modeled on ICU4C ucol_* but UTF-8 bytes+len; option bits (CODE_POINT/NUMERIC/CASE_SENSITIVE/DECIMAL)
 	result = Nix build output symlink (gitignored GC root); ./build refreshes it
 	src = Pure Zig core + C FFI adapter (hexagonal: no I/O below the CLI)
 	src/collation.zig = PURE core, no I/O: multi-level sort-key builder (L1 structural class+base letter, L2 diacritic/digit-style, L3 case/leading-zeros), foldLetter + compatExpand (n-character expansions) + digitAt (fullwidth/math digit folding), arbitrary-precision numeric runs, signs, decimal/grouped/scientific modes, compareAlloc; all unit tests
 	src/fuzz.zig = Property fuzzer: structural |L2|==|L3| level-alignment check plus independent numeric/case-fold/expansion oracles, over 8 option sets and 3 input shapes (structured, raw bytes, digits-only); the algebraic order laws are kept only as cheap guards since memcmp makes them vacuous
-	src/lib.zig = C FFI adapter: collation_mf_* export fns (open/close/strcoll8/get_sort_key/strcoll/strxfrm/version) over the Zig core
+	src/lib.zig = C FFI adapter: rcol_* export fns (open/close/strcoll8/get_sort_key/strcoll/strxfrm/version) over the Zig core
 	test = ./test — master runner: nix-built binary + Zig unit tests + all tests/integration/*.sh; exit code = failure count
 	tests = Test suites (integration; Zig unit tests live inline in src/)
 	tests/integration = Bash CLI integration suites, all driven by ./test
@@ -38,7 +38,7 @@ annotate=[
 	tests/integration/code_point_differential.sh = MFIC differential oracle: --code-point must exactly reproduce 'LC_ALL=C sort' over a generated corpus
 	tests/integration/field_sort.sh = Field/separator sorting: -t/--field-separator, -k/--key, COLLATE_FIELD_SEP precedence, missing fields
 	tests/integration/house_style.sh = End-to-end house-style ordering assertions (structural-first, natural numeric, case/diacritic tie-breaks)
-	tests/integration/i18n.sh = i18n prepare-phase: --lang/COLLATION_MF_LANG/LC_* precedence, English fallback, --hilfe/--sprache aliases
+	tests/integration/i18n.sh = i18n prepare-phase: --lang/ROMANTIC_COLLATION_LANG/LC_* precedence, English fallback, --hilfe/--sprache aliases
 	tests/integration/latin_coverage.sh = Latin coverage as a classifier over sets: sensitivity (whole declared per-language char set must be letter-class) + specificity corpus (out-of-scope must stay CLASS_OTHER); ligature/Romanian/Catalan orderings
 	tests/integration/numeric_sort.sh = Numeric collation end-to-end: natural runs, arbitrary precision past the old 250-digit cap, bc differential oracle (independent arbitrary-precision) + sort -n corroboration, signed offset-0 rule, versions vs --decimal, and a sort -g precision negative control
 ]

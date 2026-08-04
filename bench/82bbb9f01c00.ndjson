@@ -1,4 +1,4 @@
-{"_meta":"collation_mf benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"82bbb9f01c00","cpu":"AMD Ryzen Threadripper 3990X 64-Core Processor","schema":1,"generated_by":"./bm"}
+{"_meta":"romantic_collation benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"82bbb9f01c00","cpu":"AMD Ryzen Threadripper 3990X 64-Core Processor","schema":1,"generated_by":"./bm"}
 {"ts":"2026-07-24T16:46:40Z","n":50000,"contestant":"collate-house","median_s":0.053462827000000004,"min_s":0.051864103,"mean_s":0.054030265684210536,"stddev_s":0.0021685080518034426}
 {"ts":"2026-07-24T16:46:40Z","n":50000,"contestant":"collate-codepoint","median_s":0.0391889795,"min_s":0.036724098000000004,"mean_s":0.03964712474358974,"stddev_s":0.0024048888247585657}
 {"ts":"2026-07-24T16:46:40Z","n":50000,"contestant":"sort-C","median_s":0.021960989,"min_s":0.020297276000000003,"mean_s":0.022105256246031744,"stddev_s":0.0015128001014326074}

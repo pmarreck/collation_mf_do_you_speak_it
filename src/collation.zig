@@ -1,4 +1,4 @@
-//! collation_mf — pure collation core (NO I/O).
+//! romantic_collation — pure collation core (NO I/O).
 //!
 //! Produces multi-level binary sort keys whose `memcmp`/lexicographic order
 //! reproduces the intended comparison order. Comparison is defined *in terms
