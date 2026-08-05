@@ -199,11 +199,45 @@ maintained_by: agent
       without which the numeric oracle never fired. All three injected bugs now
       caught. 200k iterations = 1.7M property checks, clean.
       (2026-08-02 10:50 EDT)
+- [x] **Renamed the project** `collation_mf_do_you_speak_it` → `romantic_collation`,
+      C prefix `collation_mf_` → `rcol_` (parallels ICU's `ucol_`, which the header
+      already said the API was modeled on), macros `COLLATION_MF_` → `RCOL_`, env
+      var → `ROMANTIC_COLLATION_LANG`, header → `include/romantic_collation.h`. The
+      old name was a Pulp Fiction joke; the pun now points at the Romance-language
+      coverage that is the library's actual distinguishing work. Ordered sweep,
+      longest pattern first, because the generic rules are PREFIXES of the specific
+      ones — otherwise the header guard becomes `RCOL_DO_YOU_SPEAK_IT_H` and the env
+      var collapses to `RCOL_LANG`; bare `collation_mf` needed its own rule LAST.
+      MFIC untouched, verified before running that no sweep pattern matches it.
+      Alignment moved in BOTH directions: banners lost 10 and 9 columns to the
+      shorter title, while the `--help` env column GAINED 6 because
+      `ROMANTIC_COLLATION_LANG` is wider than `COLLATION_MF_LANG`. The `#define`
+      value column needed nothing — every macro shrank by exactly 8, so relative
+      alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
+      bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
 Current test count: 242 passed, 0 failed (80 Zig unit + 162 CLI integration).
 
 ## Open follow-ups
 
+- [ ] **Finish the rename outward.** Peter is moving the DIRECTORY and the GitHub
+      repo himself, from outside the agent session, using `chatscan` so past chat
+      contexts stay aligned with the new path. Everything in-tree is already done
+      (commit `fe9768f`). Remaining once his move lands:
+      - The README badge points at `badges/romantic_collation.json`, which returned
+        HTTP 404 when checked on 2026-08-05 — expected, it is keyed on the repo
+        name. It self-heals on the repo rename; no edit needed. If it is STILL 404
+        afterward, the Mechatron badge key needs re-provisioning (`mechatron-ci`).
+      - Re-verify `.mechatron-prime/targets` against the renamed repo and confirm
+        the webhook still fires.
+      - `git remote` still points at the old repo URL. GitHub 301-redirects so it
+        keeps working, but re-point it for cleanliness.
+      - The tmux session name is the directory basename, so it goes stale:
+        `tmux rename-session -t collation_mf_do_you_speak_it romantic_collation`.
+- [ ] **Triage `CODE_REVIEW.md`** once the Codex checker produces it (kickoff:
+      `inbox/2026-08-04-deep-code-review-kickoff.md`, which is gitignored). Sort by
+      severity. Findings that are documented deliberate trades belong in the
+      `docs/NUMERIC.md` caveats list, not in a code change.
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and
