@@ -260,6 +260,8 @@ assert_order "math double-struck"        -- 𝟚 10
 assert_order "math monospace"            -- 𝟸 10
 assert_order "folded under -d"        -d -- ９ １０
 assert_order "folded under -s"        -s -- ９ １０
+assert_order "folded signed integer"     -- -10 -５ -2
+assert_order "folded scientific fractions" -s -- 0.０ 0.0001 0.0０1 0.009
 # Same value, so this must be a real ordering rather than an input-order artifact.
 one_a=$(printf '1\n１\n' | "$CLI" | tr '\n' ' ')
 one_b=$(printf '１\n1\n' | "$CLI" | tr '\n' ' ')

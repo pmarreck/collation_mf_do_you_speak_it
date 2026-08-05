@@ -114,12 +114,13 @@ There is no order that satisfies both, which is precisely why coreutils ships
 - **Default: every `.` is a separator** — version and filename semantics
   (`1.9 < 1.10`). This is the default because dotted-number data in the wild is
   overwhelmingly version- and path-shaped.
-- **`-d` / `--decimal`**: the first `.` of a *leading* number is a decimal point
+- **`-d` / `--decimal`**: `.` in every digit run is a decimal point
   (`1.10 < 1.9`, `0.45 < 0.5`, `1 < 1.5 < 2`). `--version-sort` is the explicit
   form of the default, so a later argument can override an earlier `-d`.
 
-`--decimal` applies **only at offset 0**, so `v1.9 < v1.10` regardless of the
-flag, and a second dot in the same number is always a separator.
+`--decimal` applies to **every numeric run**, so `v1.10 < v1.9` under the flag.
+A second dot in the same number is always a separator. A sign remains recognized
+only at offset 0, so `peter-3` keeps separator semantics.
 
 ## Grouped numbers (`--decimal`) — and why the localization nightmare evaporates
 

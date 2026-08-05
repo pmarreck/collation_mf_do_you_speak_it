@@ -235,13 +235,15 @@ landed after `z` by virtue of being unrecognized.
 - NFC handling covers common **precomposed** Latin accents; **decomposed**
   combining-mark sequences are not yet folded (the combining mark is treated as
   its own "other" element). Full normalization is deferred.
-- `strcoll8` allocates temporary keys per call; the performance model is
-  "precompute a sort key once, compare many". SIMD/streaming compare is deferred.
+- `strcoll8` builds temporary keys in an 8 KiB stack scratch buffer and falls
+  back to the heap for oversized inputs. Precomputing sort keys still wins when
+  each string is compared many times; SIMD/streaming compare is deferred.
 - **Numeric caveats are enumerated in [docs/NUMERIC.md](docs/NUMERIC.md)** — in
-  short: leading zeros are invisible (`007` == `7`), thousands separators and
-  exponent notation are not understood, an explicit `+` is not a sign, a sign is
-  only recognized at the start of the collated string (use `-t`/`-k` to make a
-  number a field), and digits must be ASCII.
+  short: default text sort distinguishes leading zeroes, numeric modes collapse
+  leading and fractional trailing zeroes, `--decimal` must not be used for
+  version strings, and a sign is recognized only at the start of the collated
+  string (use `-t`/`-k` to make a number a field). ASCII, fullwidth, and
+  Mathematical Alphanumeric decimal digits are supported.
 
 ## Naming
 

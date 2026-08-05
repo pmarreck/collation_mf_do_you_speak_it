@@ -216,7 +216,14 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 242 passed, 0 failed (80 Zig unit + 162 CLI integration).
+Current test count: 247 passed, 0 failed (83 Zig unit + 164 CLI integration).
+
+- [x] **Post-review critical fixes.** Independently reproduced and repaired the
+      folded-digit failures in leading negative, decimal, and scientific paths;
+      code-point sort keys now include the public API's terminal NUL. Removed the
+      unreachable byte-oriented signed-number implementation, corrected stale
+      numeric documentation, and added unit, FFI, and CLI regressions. Full suite:
+      247 passed, 0 failed. Report: `CODE_REVIEW.md`. (2026-08-05 13:01 EDT)
 
 ## Open follow-ups
 
@@ -234,10 +241,14 @@ Current test count: 242 passed, 0 failed (80 Zig unit + 162 CLI integration).
         keeps working, but re-point it for cleanliness.
       - The tmux session name is the directory basename, so it goes stale:
         `tmux rename-session -t collation_mf_do_you_speak_it romantic_collation`.
-- [ ] **Triage `CODE_REVIEW.md`** once the Codex checker produces it (kickoff:
-      `inbox/2026-08-04-deep-code-review-kickoff.md`, which is gitignored). Sort by
-      severity. Findings that are documented deliberate trades belong in the
-      `docs/NUMERIC.md` caveats list, not in a code change.
+- [x] **Triage `CODE_REVIEW.md`.** The 13-dimension audit found two critical,
+      four warning, and two advisory items; the confirmed critical defects and
+      related documentation/test/dead-code issues are complete above. (2026-08-05
+      13:01 EDT)
+- [ ] **Decide the remaining review findings.** `CODE_REVIEW.md` leaves three
+      changes with product/API tradeoffs: Unicode-symbol boundaries for `--roman`,
+      a reported allocation-failure path in the C comparison API, and a
+      same-machine baseline threshold in `./bm`.
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and

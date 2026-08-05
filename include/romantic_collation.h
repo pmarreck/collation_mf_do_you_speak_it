@@ -44,13 +44,14 @@ extern "C" {
  * will promote case to a primary distinction. v1: no-op. */
 #define RCOL_CASE_SENSITIVE (1u << 2)
 
-/* Read the first `.` of a LEADING number as a decimal point (1.10 < 1.9)
- * instead of a separator. OFF by default: dotted numbers in the wild are
+/* Read `.` in every digit run as a decimal point (1.10 < 1.9) instead of a
+ * separator. OFF by default: dotted numbers in the wild are
  * overwhelmingly version- and filename-shaped, where 1.9 < 1.10 is wanted.
  * The two readings are mutually exclusive — no single order satisfies both,
  * which is why coreutils ships `-n`, `-V` and `-g` separately rather than
- * unifying them. Applies at offset 0 of the collated string only, so
- * "peter-3" and "v1.9" keep separator semantics either way. */
+ * unifying them. A sign still applies only at offset 0 of the collated string,
+ * so "peter-3" keeps separator semantics. Decimal mode therefore must not be
+ * used for version strings: `v1.10 < v1.9` under this option. */
 #define RCOL_DECIMAL        (1u << 3)
 
 /* With RCOL_DECIMAL, ',' is the decimal separator and '.' groups digits
@@ -128,8 +129,11 @@ int rcol_strcoll8(
 /**
  * Write a binary sort key for `s` into `out` (analog of `ucol_getSortKey`).
  * The key's `memcmp` order equals `rcol_strcoll8` order — precompute
- * once, compare many. The key is NUL-terminated and contains no interior NUL,
- * so C callers may compare with `strcmp`/`memcmp`.
+ * once, compare many. The key is NUL-terminated. House-style keys contain no
+ * interior NUL, so C callers may compare them with `strcmp`/`memcmp`.
+ * RCOL_CODE_POINT keys mirror the explicit-length input bytes and can contain
+ * an interior NUL if the input does; compare those with `memcmp` and the
+ * returned length.
  *
  * Returns the total number of bytes the full key needs (including the trailing
  * NUL). If that exceeds `out_cap`, the key was truncated but the returned

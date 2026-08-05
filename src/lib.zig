@@ -147,6 +147,17 @@ test "ffi: code-point mode == raw byte order" {
     try testing.expectEqual(@as(i32, -1), rcol_strcoll8(coll, a.ptr, a.len, b.ptr, b.len));
 }
 
+test "ffi: code-point sort key includes its promised NUL terminator" {
+    const coll = rcol_open(collation.OPT_CODE_POINT) orelse return error.OpenFailed;
+    defer rcol_close(coll);
+    const s = "Zebra";
+    var key: [s.len + 1]u8 = undefined;
+    const n = rcol_get_sort_key(coll, s.ptr, s.len, &key, key.len);
+    try testing.expectEqual(s.len + 1, n);
+    try testing.expectEqualStrings(s, key[0..s.len]);
+    try testing.expectEqual(@as(u8, 0), key[s.len]);
+}
+
 test "ffi: get_sort_key length probe (out=null, cap=0)" {
     const coll = rcol_open(0) orelse return error.OpenFailed;
     defer rcol_close(coll);

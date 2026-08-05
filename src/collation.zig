@@ -24,8 +24,8 @@ const std = @import("std");
 pub const OPT_CODE_POINT: u32 = 1 << 0;
 pub const OPT_NUMERIC: u32 = 1 << 1; // reserved (numeric is default-on in house style)
 pub const OPT_CASE_SENSITIVE: u32 = 1 << 2; // reserved
-/// Treat the first `.` of a LEADING number as a decimal point (1.10 < 1.9)
-/// instead of a separator. OFF by default, because dotted-number data in the
+/// Treat `.` in every digit run as a decimal point (1.10 < 1.9) instead of a
+/// separator. OFF by default, because dotted-number data in the
 /// wild is overwhelmingly version- and filename-shaped, where 1.9 < 1.10 is the
 /// wanted answer. The two readings are mutually exclusive — no single order
 /// satisfies both — which is exactly why coreutils ships `-n`, `-V`, and `-g`
@@ -675,13 +675,14 @@ fn scanGroupedNumber(s: []const u8, start: usize, comma_decimal: bool, absorb: b
     if (i + 1 < s.len and s[i] == dec and digitAt(s, i + 1) != null) {
         i += 1;
         fs = i;
+        var last_nonzero_end = fs;
         while (i < s.len) {
             const d = digitAt(s, i) orelse break;
+            if (d.v != 0) last_nonzero_end = i + d.len;
             i += d.len;
         }
-        fe = i;
         // Trailing zeros carry no value: 1.50 == 1.5, 1.00 == 1.
-        while (fe > fs and s[fe - 1] == '0') fe -= 1;
+        fe = last_nonzero_end;
     }
     return .{ .int_start = start, .int_end = int_end, .frac_start = fs, .frac_end = fe, .end = i };
 }
@@ -834,10 +835,16 @@ fn pushScientific(
 
     // Leading zeros of the fraction are placeholders, not significant digits.
     var lead_zeros: usize = 0;
+    var frac_sig_start: usize = 0;
     if (int_sig == 0) {
-        while (lead_zeros < frac_slice.len and frac_slice[lead_zeros] == '0') lead_zeros += 1;
+        while (frac_sig_start < frac_slice.len) {
+            const d = digitAt(frac_slice, frac_sig_start) orelse break;
+            if (d.v != 0) break;
+            lead_zeros += 1;
+            frac_sig_start += d.len;
+        }
     }
-    const frac_sig = frac_slice[if (int_sig == 0) lead_zeros else 0..];
+    const frac_sig = frac_slice[frac_sig_start..];
     const is_zero = int_sig == 0 and frac_sig.len == 0;
 
     try l1.append(alloc, if (neg) CLASS_NEG else CLASS_DIGIT);
@@ -872,83 +879,30 @@ fn pushScientific(
     try l3.append(alloc, CASE_NEUTRAL);
 }
 
-/// A signed and/or fractional number found at the START of the collated string.
-const LeadingNum = struct {
-    neg: bool,
-    zeros: usize, // leading zeros stripped from `int`, kept for the tertiary weight
-    int: []const u8, // significant integer digits, leading zeros stripped
-    frac: []const u8, // fractional digits, trailing zeros stripped
-    end: usize, // index just past the consumed number
+/// A signed integer found at the start of the collated string. Decimal-mode
+/// numbers use the grouped scanner instead, so this path only preserves the
+/// default version semantics for a leading ASCII minus sign.
+const LeadingNegative = struct {
+    digits: []const u8,
+    end: usize,
 };
 
-/// Recognize `-?digits(.digits)?` but ONLY at offset 0, which is the whole point:
-/// a '-' or '.' anywhere else is a separator, so "peter-3" keeps sorting before
-/// "peter-4" and "v1.9" keeps version semantics (1.9 < 1.10). Under `-t`/`-k` the
-/// collated string IS the field, so "offset 0" means the start of the sort field.
-///
-/// Returns null for a plain unsigned integer with no decimal point, which routes
-/// it back through the ordinary scanner and makes byte-identical backward
-/// compatibility true BY CONSTRUCTION rather than by careful duplication.
-fn parseLeadingNumber(s: []const u8, decimal: bool) ?LeadingNum {
-    var i: usize = 0;
-    const neg = s.len > 1 and s[0] == '-' and digitAt(s, 1) != null;
-    if (neg) i = 1;
-
-    const int_start = i;
-    while (i < s.len) {
-        const d = digitAt(s, i) orelse break;
-        i += d.len;
-    }
-    if (i == int_start) return null; // no digit run here at all
-
-    var int_digits = s[int_start..i];
-    var z: usize = 0;
-    while (z < int_digits.len and int_digits[z] == '0') z += 1;
-    int_digits = int_digits[z..];
-
-    var frac: []const u8 = &.{};
-    var had_dot = false;
-    if (decimal and i + 1 < s.len and s[i] == '.' and digitAt(s, i + 1) != null) {
-        had_dot = true;
-        const fs = i + 1;
-        i += 1;
-        while (i < s.len) {
-            const d = digitAt(s, i) orelse break;
-            i += d.len;
-        }
-        frac = s[fs..i];
-        // Trailing zeros are not significant in a fraction: 1.50 == 1.5, 1.00 == 1.
-        var e = frac.len;
-        while (e > 0 and frac[e - 1] == '0') e -= 1;
-        frac = frac[0..e];
-    }
-
-    if (!neg and !had_dot) return null; // exactly the pre-existing behavior
-    return .{ .neg = neg, .zeros = z, .int = int_digits, .frac = frac, .end = i };
+fn parseLeadingNegative(s: []const u8) ?LeadingNegative {
+    if (s.len < 2 or s[0] != '-') return null;
+    const run = scanDigitRun(s, 1);
+    if (run.end == 1) return null;
+    return .{ .digits = s[1..run.end], .end = run.end };
 }
 
-/// Emit one signed/fractional number as a single primary element. Contributes
-/// exactly one L2 and one L3 entry, like every other numeric run.
-fn pushSignedDecimal(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: LeadingNum) !void {
-    if (n.neg) {
-        try l1.append(alloc, CLASS_NEG);
-        try pushNumLength(l1, alloc, n.int.len, true);
-        for (n.int) |d| try l1.append(alloc, NEG_DIGIT_TOP - (d - '0'));
-        for (n.frac) |d| try l1.append(alloc, NEG_DIGIT_TOP - (d - '0'));
-        try l1.append(alloc, NEG_END);
-    } else {
-        // The fractional digits need no marker: they are already ordered below
-        // CLASS_LETTER, so "1.5" < "1x" stays consistent with digits-before-letters,
-        // and the plain prefix rule gives 1 < 1.5 < 1.55 for free.
-        try l1.append(alloc, CLASS_DIGIT);
-        try pushNumLength(l1, alloc, n.int.len, false);
-        for (n.int) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
-        for (n.frac) |d| try l1.append(alloc, WEIGHT_BASE + (d - '0'));
-    }
+/// Emit a leading negative integer with the same code-point-aware digit helpers
+/// as every other numeric path, while retaining default-mode leading-zero order.
+fn pushLeadingNegative(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: LeadingNegative) !void {
+    try l1.append(alloc, CLASS_NEG);
+    try pushNumLength(l1, alloc, countSigDigits(n.digits), true);
+    try emitSigDigits(l1, alloc, n.digits, true);
+    try l1.append(alloc, NEG_END);
     try l2.append(alloc, WEIGHT_BASE + D_NONE);
-    // Same tertiary leading-zero weight the unsigned path uses, so -007 < -7 is
-    // a real ordering rather than a tie resolved by the caller.
-    try l3.append(alloc, NUM_ZERO_TOP - @as(u8, @intCast(@min(n.zeros, NUM_ZERO_MAX))));
+    try l3.append(alloc, leadingZeroWeight(n.digits));
 }
 
 /// Append the primary bytes for one ASCII digit run, length-prefixed with the
@@ -1027,12 +981,15 @@ fn pushOtherPrimary(l1: *L1, alloc: std.mem.Allocator, cp: u21) !void {
 
 /// Build the full sort key for `s` under `options`. Caller owns the result.
 ///
-/// In code-point mode the key is simply the raw UTF-8 bytes (UTF-8 byte order
-/// == Unicode code-point order == `LC_ALL=C sort`). In house-style mode it is
-/// the three-level structural key described in the file header.
+/// In code-point mode the key is raw UTF-8 bytes plus a terminal NUL (UTF-8 byte
+/// order == Unicode code-point order == `LC_ALL=C sort`). In house-style mode it
+/// is the three-level structural key described in the file header.
 pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8 {
     if (options & OPT_CODE_POINT != 0) {
-        return alloc.dupe(u8, s);
+        const key = try alloc.alloc(u8, s.len + 1);
+        @memcpy(key[0..s.len], s);
+        key[s.len] = TERM;
+        return key;
     }
 
     var l1: L1 = .empty;
@@ -1058,11 +1015,11 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
     const absorb = options & OPT_DECIMAL != 0;
 
     // In decimal mode the grouped scanner owns ALL number scanning (below), so
-    // only the plain house-style path consults parseLeadingNumber here.
+    // only the plain house-style path consults the leading-negative parser here.
     if (!decimal) {
-        if (parseLeadingNumber(s, false)) |ln| {
-            try pushSignedDecimal(&l1, &l2, &l3, alloc, ln);
-            i = ln.end;
+        if (parseLeadingNegative(s)) |negative| {
+            try pushLeadingNegative(&l1, &l2, &l3, alloc, negative);
+            i = negative.end;
         }
     }
 
@@ -1724,6 +1681,29 @@ test "digits: folded forms stay DISTINGUISHABLE from ASCII (total order)" {
     try testing.expect((try compareAlloc(testing.allocator, h, "12", "1２")) != 0);
 }
 
+test "digits: folded forms work in leading signed numbers" {
+    const h: u32 = 0;
+    try expectOrder(h, "-10", "-５");
+    try expectOrder(h, "-10", "-𝟓");
+    try expectOrder(h, "-５", "-2");
+}
+
+test "digits: folded fractional zeroes preserve numeric value" {
+    const decimal = OPT_DECIMAL;
+    const scientific = OPT_SCIENTIFIC;
+    try testing.expectEqual(
+        @as(i32, 0),
+        try compareAlloc(testing.allocator, decimal, "1.5", "1.５０"),
+    );
+    try testing.expectEqual(
+        @as(i32, 0),
+        try compareAlloc(testing.allocator, scientific, "0", "0.０"),
+    );
+    try expectOrder(scientific, "0.０", "0.0001");
+    try expectOrder(scientific, "0.0０1", "0.009");
+    try expectOrder(scientific, "-0.009", "-0.0０1");
+}
+
 test "digits: non-digit lookalikes are NOT folded" {
     const h: u32 = 0;
     // Specificity: fullwidth LETTERS and math letters must not become digits.
@@ -1994,7 +1974,7 @@ test "versions: DEFAULT treats every '.' as a separator (1.9 < 1.10)" {
     try expectOrder(h, "1.2.9", "1.2.10");
 }
 
-test "decimal: OPT_DECIMAL makes a leading number's first '.' a decimal point" {
+test "decimal: OPT_DECIMAL makes every digit run's first '.' a decimal point" {
     const d = OPT_DECIMAL;
     try expectOrder(d, "1.10", "1.9"); // 1.10 == 1.1 < 1.9 — the flip
     try expectOrder(d, "0.45", "0.5");
