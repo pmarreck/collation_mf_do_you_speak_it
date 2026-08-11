@@ -218,6 +218,12 @@ maintained_by: agent
 
 Current test count: 247 passed, 0 failed (83 Zig unit + 164 CLI integration).
 
+- [x] **Mechatron cutover to `romantic_collation`.** GitHub rename confirmed;
+      the existing active push webhook survived. Repointed `origin`, pushed
+      `15a2c65`, and verified Mechatron built all selected targets successfully
+      in 73 seconds. The canonical `romantic_collation` README badge is live and
+      `PASSING`. (2026-08-11 15:16 EDT)
+
 - [x] **Post-review critical fixes.** Independently reproduced and repaired the
       folded-digit failures in leading negative, decimal, and scientific paths;
       code-point sort keys now include the public API's terminal NUL. Removed the
@@ -227,20 +233,9 @@ Current test count: 247 passed, 0 failed (83 Zig unit + 164 CLI integration).
 
 ## Open follow-ups
 
-- [ ] **Finish the rename outward.** Peter is moving the DIRECTORY and the GitHub
-      repo himself, from outside the agent session, using `chatscan` so past chat
-      contexts stay aligned with the new path. Everything in-tree is already done
-      (commit `fe9768f`). Remaining once his move lands:
-      - The README badge points at `badges/romantic_collation.json`, which returned
-        HTTP 404 when checked on 2026-08-05 — expected, it is keyed on the repo
-        name. It self-heals on the repo rename; no edit needed. If it is STILL 404
-        afterward, the Mechatron badge key needs re-provisioning (`mechatron-ci`).
-      - Re-verify `.mechatron-prime/targets` against the renamed repo and confirm
-        the webhook still fires.
-      - `git remote` still points at the old repo URL. GitHub 301-redirects so it
-        keeps working, but re-point it for cleanliness.
-      - The tmux session name is the directory basename, so it goes stale:
-        `tmux rename-session -t collation_mf_do_you_speak_it romantic_collation`.
+- [ ] **Finish local rename cleanup.** The GitHub and Mechatron cutover is
+      complete. If a local tmux session still has the old project name, rename it
+      to `romantic_collation`.
 - [x] **Triage `CODE_REVIEW.md`.** The 13-dimension audit found two critical,
       four warning, and two advisory items; the confirmed critical defects and
       related documentation/test/dead-code issues are complete above. (2026-08-05
