@@ -2,6 +2,10 @@
 
 [![Mechatron Prime CI](https://img.shields.io/endpoint?url=https%3A%2F%2Fthelio-nixos.tail66c90.ts.net%2Fbadges%2Fromantic_collation.json&style=for-the-badge)](https://thelio-nixos.tail66c90.ts.net/mechatron-prime/)
 
+Read in: **English** · [Français](README.fr.md) · [Español](README.es.md) ·
+[Italiano](README.it.md) · [Português (Brasil)](README.pt_br.md) · [Català](README.ca.md) ·
+[Română](README.ro.md)
+
 A small, **fast**, **opinionated**, cross-platform, **reproducible** string
 collation / sorting library that ships its own versioned ordering and **ignores
 the OS locale entirely**.
@@ -86,7 +90,7 @@ collate [OPTIONS] [FILE]      # sorts lines from FILE (or stdin) to stdout
   -h, --help                   Show help
       --about                  One-line version + platform
       --version                Library version
-      --lang <code>            UI language for --help/--about (e.g. en, de)
+      --lang <code>            UI language for --help/--about (e.g. en, fr, es)
 ```
 
 `FILE` may be `-` or `@stdin` for standard input (the default).
@@ -116,8 +120,12 @@ printf 'a:3\nb:1\nc:2\n' | collate -t: -k2
 
 `--help`/`--about` are localizable. Precedence: `--lang <code>` overrides
 `ROMANTIC_COLLATION_LANG`, which overrides `LANG`/`LC_*`; English is the default and
-fallback. Today only `en` and a `de` demonstration locale ship (full coverage is
-future work). Localized aliases: `--hilfe` (German help), `--sprache` (= `--lang`).
+fallback. The prepare-phase catalogs are `en`, `de`, `fr`, `es`, `it`, `pt_br`, `ca`,
+and `ro`; full 50-locale coverage remains future work. Localized aliases are
+`--hilfe`/`--sprache` (German), `--aide`/`--langue` (French),
+`--ayuda`/`--idioma` (Spanish), `--aiuto`/`--lingua` (Italian),
+`--ajuda`/`--linguagem` (Portuguese), `--ajut`/`--llengua` (Catalan), and
+`--ajutor`/`--limba` (Romanian).
 
 ## C FFI (the real public API)
 

@@ -5,9 +5,15 @@ annotate=[
 	.mechatron-prime/targets = Exact flake attrs the Thelio worker builds per signed push: packages.default + checks.build/test
 	CODE_REVIEW.md = Independent 13-dimension audit with implementation status and remaining design decisions
 	LICENSE = MIT
-	PLAN.md = Work plan: done items with dates, open follow-ups, deferred future work
+	PLAN.md = Work plan: completed core/i18n work, active Latin-order and review decisions, deferred future scope.
 	PROJECT_OVERVIEW.md = Ultimate goals, rationale (glibc/musl/ICU), architecture diagram, terminology (sort key, house style, collation element, levels)
-	README.md = User-facing: why, house-style rules, build/test, CLI + field/lang usage, C FFI, benchmark table, v1 limits
+	README.ca.md = Catalan README edition with reciprocal language selector.
+	README.es.md = Spanish README edition with reciprocal language selector.
+	README.fr.md = French README edition with reciprocal language selector.
+	README.it.md = Italian README edition with reciprocal language selector.
+	README.md = User-facing English README: house style, build/test, CLI/i18n catalogs, FFI, benchmarks, and v1 limits; links Romance-language editions.
+	README.pt_br.md = Brazilian Portuguese README edition with reciprocal language selector.
+	README.ro.md = Romanian README edition with reciprocal language selector.
 	RULES.md = Load-bearing invariants (structural-first, no OS locale, key-order==compare-order, C-safe keys, pure core, CLI dogfoods FFI, TDD)
 	bench = Benchmark harnesses, oracle competitors, and the source-controlled results log
 	bench/82bbb9f01c00.ndjson = Benchmark log for the Threadripper 3990X machine — one record per contestant per run, _meta header line
@@ -19,7 +25,7 @@ annotate=[
 	build.zig = Zig build: forces static-musl on native Linux, ReleaseFast default, static lib + C CLI + test step
 	build.zig.zon = Package manifest (name, 0.1.0, min Zig 0.16.0, no deps, packaged paths)
 	cli = C CLI that dogfoods the FFI (written in C so it CANNOT import the Zig core)
-	cli/main.c = The 'collate' command: arg parsing (-t/-k fields, -c code-point, -d/--decimal vs --version-sort), i18n message tables (en/de), file+stdin I/O, qsort by FFI sort keys with raw-line tie-break
+	cli/main.c = The collate CLI: field/numeric parsing, eight prepare-phase i18n catalogs (en, de, fr, es, it, pt_br, ca, ro), localized aliases, file/stdin I/O, qsort by FFI sort keys.
 	docs = Deep-dive docs for behavior that needs more room than the README
 	docs/NUMERIC.md = Numeric collation: length-prefixed digit runs, arbitrary precision via a BLIP-derived escalating length class, offset-0 sign rule, versions-vs--decimal, group-separator absorption, scientific (exponent,mantissa) normalization, and all verified caveats
 	flake.lock = Pinned flake input revisions (reproducibility)
@@ -39,7 +45,8 @@ annotate=[
 	tests/integration/code_point_differential.sh = MFIC differential oracle: --code-point must exactly reproduce 'LC_ALL=C sort' over a generated corpus
 	tests/integration/field_sort.sh = Field/separator sorting: -t/--field-separator, -k/--key, COLLATE_FIELD_SEP precedence, missing fields
 	tests/integration/house_style.sh = End-to-end house-style ordering assertions (structural-first, natural numeric, case/diacritic tie-breaks)
-	tests/integration/i18n.sh = i18n prepare-phase: --lang/ROMANTIC_COLLATION_LANG/LC_* precedence, English fallback, --hilfe/--sprache aliases
+	tests/integration/i18n.sh = i18n prepare-phase: language precedence, supported eight-catalog help/about, localized aliases, pt_br full-code parsing, and set-based alias collision checks.
 	tests/integration/latin_coverage.sh = Latin coverage as a classifier over sets: sensitivity (whole declared per-language char set must be letter-class) + specificity corpus (out-of-scope must stay CLASS_OTHER); ligature/Romanian/Catalan orderings
 	tests/integration/numeric_sort.sh = Numeric collation end-to-end: natural runs, arbitrary precision past the old 250-digit cap, bc differential oracle (independent arbitrary-precision) + sort -n corroboration, signed offset-0 rule, versions vs --decimal, and a sort -g precision negative control
+	tests/integration/readme_translations.sh = Checks reciprocal language-selector links across translated READMEs.
 ]

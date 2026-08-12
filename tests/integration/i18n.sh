@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Integration test: i18n groundwork (PREPARE phase) for --help/--about.
 #   --lang <code> + ROMANTIC_COLLATION_LANG override LANG/LC_*; English is the
-#   default/fallback. Localized aliases: --hilfe (German help), --sprache
-#   (German alias for --lang). Only en + de exist in prepare phase; unsupported
-#   locales WARN (non-fatal) and fall back to English.
+#   default/fallback. Supported catalogs: en, de, fr, es, it, pt_br, ca, ro.
+#   Each non-English catalog has a localized help and language alias that infer
+#   its UI language. Unsupported locales WARN (non-fatal) and fall back to
+#   English.
 #
 # The environment is scrubbed of LANG/LC_*/ROMANTIC_COLLATION_LANG per case so an
 # ambient locale on the test host cannot perturb results.
@@ -36,6 +37,7 @@ out=$(run "$CLI" --about 2>/dev/null)
 want_contains "default about is English" "opinionated" "$out"
 out=$(run "$CLI" --help 2>/dev/null)
 want_contains "default help is English" "structural-first" "$out"
+want_contains "English help names Spanish/Romanian slots" "n < ñ < o" "$out"
 
 # ── --lang de => German about ──
 out=$(run "$CLI" --lang de --about 2>/dev/null)
@@ -88,6 +90,58 @@ want_missing "ambient unsupported LANG is silent" "missing-locale" "$stderr"
 # ── plain English canonical flags never infer a non-English locale ──
 out=$(run "$CLI" --help 2>/dev/null)
 want_missing "English --help stays English (no de inference)" "Optionen" "$out"
+
+# ── localized aliases must be disjoint from English canonical options ──
+# Classify every current localized alias against the complete English option set;
+# a copied English alias would silently switch the UI language.
+english_options=(--help --about --version --lang --field-separator --key --code-point --decimal --decimals --dec --scientific --sci --roman --numeric --num --version-sort)
+localized_aliases=(--hilfe --sprache --aide --langue --ayuda --idioma --aiuto --lingua --ajuda --linguagem --ajut --llengua --ajutor --limba)
+alias_collision=0
+for localized in "${localized_aliases[@]}"; do
+	for english in "${english_options[@]}"; do
+		if [[ "$localized" == "$english" ]]; then
+			fail "localized alias $localized is disjoint from English options" "collides with $english"
+			alias_collision=1
+		fi
+	done
+done
+if [[ $alias_collision -eq 0 ]]; then
+	pass "14 localized aliases are disjoint from 16 English options (224 comparisons)"
+fi
+
+# An explicit language code overrides the UI language inferred from a localized
+# help alias, regardless of option order.
+out=$(run "$CLI" --aide --lang es --about 2>/dev/null)
+want_contains "explicit --lang overrides localized help inference" "configuración regional" "$out"
+
+# ── Romance-language catalog availability + localized aliases ──
+# code, expected localized marker, localized --help alias, localized --lang alias
+check_romance_locale() {
+	local code="$1" marker="$2" help_alias="$3" lang_alias="$4"
+	local locale_help about alias_help alias_lang
+	locale_help=$(run "$CLI" --lang "$code" --help 2>/dev/null)
+	want_contains "--lang $code selects its help" "$marker" "$locale_help"
+	want_contains "--lang $code help names primary Latin slots" "n < ñ < o" "$locale_help"
+	about=$(run "$CLI" --lang "$code" --about 2>/dev/null)
+	want_contains "--lang $code selects its about" "$marker" "$about"
+	alias_help=$(run "$CLI" "$help_alias" 2>/dev/null)
+	want_contains "$help_alias infers $code" "$marker" "$alias_help"
+	alias_lang=$(run "$CLI" "$lang_alias" "$code" --about 2>/dev/null)
+	want_contains "$lang_alias selects $code" "$marker" "$alias_lang"
+}
+
+check_romance_locale fr "paramètres régionaux" --aide --langue
+check_romance_locale es "configuración regional" --ayuda --idioma
+check_romance_locale it "criterio proprio" --aiuto --lingua
+check_romance_locale pt_br "configuração regional" --ajuda --linguagem
+out=$(run "$CLI" --lang pt_BR.UTF-8 --about 2>/dev/null)
+want_contains "pt_BR.UTF-8 selects Brazilian Portuguese" "configuração regional" "$out"
+stdout=$(run "$CLI" --lang pt_PT --about 2>/dev/null)
+stderr=$(run "$CLI" --lang pt_PT --about 2>&1 >/dev/null)
+want_contains "pt_PT does not select Brazilian Portuguese" "opinionated" "$stdout"
+want_contains "pt_PT warns as an unavailable catalog" "missing-locale" "$stderr"
+check_romance_locale ca "configuració regional" --ajut --llengua
+check_romance_locale ro "configurare regională" --ajutor --limba
 
 echo ""
 echo "i18n: $PASS passed, $FAIL failed"

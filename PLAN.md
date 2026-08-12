@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 250 passed, 0 failed (86 Zig unit + 164 CLI integration).
+Current test count: 335 passed, 0 failed (86 Zig unit + 249 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -241,6 +241,17 @@ Current test count: 250 passed, 0 failed (86 Zig unit + 164 CLI integration).
 
 ## Open follow-ups
 
+- [x] **Expand prepare-phase Romance-language UI catalogs.** `--help` names the
+      Spanish/Romanian primary-letter exceptions. Complete `--help`/`--about`
+      catalogs and localized help/language aliases ship for French, Spanish,
+      Italian, Brazilian Portuguese (`pt_br`), Catalan, and Romanian. The alias
+      classifier checks 224 localized-versus-English option pairs; locale parsing
+      accepts `pt_BR.UTF-8` and does not misroute `pt_PT`. (2026-08-12 19:03 EDT)
+- [x] **Publish linked Romance-language README editions.** French, Spanish,
+      Italian, Brazilian Portuguese, Catalan, and Romanian README editions have
+      a reciprocal selector checked across all 49 directed links. Literal CLI
+      names, commands, file links, and technical symbols stay unchanged.
+      (2026-08-12 19:03 EDT)
 - [ ] **Evolve the global Latin house order deliberately.** The current
       root-like behavior is provisional while the product is being designed;
       evaluate regional preferences as candidates for the default whenever a

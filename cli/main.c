@@ -49,22 +49,36 @@ static void announce_debug_build(void) {
 }
 
 /* ── i18n (PREPARE phase) ──────────────────────────────────────────────────
- * English is canonical and the fallback; German (de) is a demonstration locale
- * that exercises the localized-alias + env-precedence machinery. Strings live
- * in this typed table (never inline at the use site). Full 50-locale coverage
- * and compile-time enforcement are DEFERRED to the enforce phase — see
- * RULES.md and the i18n skill. */
-typedef enum { LANG_EN = 0, LANG_DE, LANG_COUNT } lang_t;
+ * English is canonical and the fallback. The current prepare-phase catalogs
+ * exercise localized aliases and env precedence for German plus the supported
+ * Romance languages. Strings live in this typed table (never inline at the use
+ * site). Full 50-locale coverage and compile-time enforcement are DEFERRED to
+ * the enforce phase — see RULES.md and the i18n skill. */
+typedef enum {
+    LANG_EN = 0,
+    LANG_DE,
+    LANG_FR,
+    LANG_ES,
+    LANG_IT,
+    LANG_PT_BR,
+    LANG_CA,
+    LANG_RO,
+    LANG_COUNT,
+} lang_t;
 
 typedef struct {
-    const char *code;       /* ISO code, e.g. "en" */
-    const char *about_desc; /* trailing one-line description in --about */
-    const char *help_text;  /* full --help body */
+    const char *code;        /* ISO code, e.g. "en" */
+    const char *help_alias;  /* localized --help; NULL for English */
+    const char *lang_alias;  /* localized --lang; NULL for English */
+    const char *about_desc;  /* trailing one-line description in --about */
+    const char *help_text;   /* full --help body */
 } messages_t;
 
 static const messages_t MESSAGES[LANG_COUNT] = {
     [LANG_EN] = {
         "en",
+        NULL,
+        NULL,
         "locale-free opinionated collation",
         "collate — fast, opinionated, reproducible, locale-free line sort\n"
         "\n"
@@ -79,6 +93,8 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  natural numeric runs (file2 < file10)\n"
         "  case-insensitive base letters (apple ~ Apple), lowercase first\n"
         "  diacritics as a secondary tie-break (café near cafe, not after z)\n"
+        "  Spanish/Romanian primary slots: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (Romanian comma-below/cedilla forms equal)\n"
         "\n"
         "Options:\n"
         "  -t, --field-separator <SEP>  Split each line on SEP (default: whole line)\n"
@@ -106,7 +122,7 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  -h, --help                   Show this help\n"
         "      --about                  Print one-line version + platform\n"
         "      --version                Print the library version\n"
-        "      --lang <code>            UI language (e.g. en, de); overrides env\n"
+        "      --lang <code>            UI language (e.g. en, de, fr, es); overrides env\n"
         "\n"
         "Environment:\n"
         "  ROMANTIC_COLLATION_LANG      UI language (overrides LANG/LC_*)\n"
@@ -114,6 +130,8 @@ static const messages_t MESSAGES[LANG_COUNT] = {
     },
     [LANG_DE] = {
         "de",
+        "--hilfe",
+        "--sprache",
         "gebietsschema-freie, eigensinnige Sortierung",
         "collate — schnelle, eigensinnige, reproduzierbare Zeilensortierung ohne Gebietsschema\n"
         "\n"
@@ -128,6 +146,8 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  natürliche Zahlenläufe (file2 < file10)\n"
         "  Groß-/Kleinschreibung-unabhängige Grundbuchstaben (apple ~ Apple), klein zuerst\n"
         "  Diakritika als sekundäres Kriterium (café nahe cafe, nicht nach z)\n"
+        "  Spanische/rumänische Grundpositionen: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (rumänische Komma-/Cedillaformen sind gleich)\n"
         "\n"
         "Optionen:\n"
         "  -t, --field-separator <SEP>  Zeile an SEP trennen (Standard: ganze Zeile)\n"
@@ -155,23 +175,389 @@ static const messages_t MESSAGES[LANG_COUNT] = {
         "  ROMANTIC_COLLATION_LANG      Anzeigesprache (überschreibt LANG/LC_*)\n"
         "  COLLATE_FIELD_SEP            Standard-Feldtrenner (durch -t überschrieben)\n",
     },
+    [LANG_FR] = {
+        "fr",
+        "--aide",
+        "--langue",
+        "collation assumée sans paramètres régionaux",
+        "collate — tri de lignes rapide, assumé, reproductible, sans paramètres régionaux\n"
+        "\n"
+        "Utilisation :\n"
+        "  collate [OPTIONS] [FICHIER]\n"
+        "\n"
+        "Lit les lignes de FICHIER (ou de l’entrée standard) et les écrit triées sur la sortie standard.\n"
+        "FICHIER peut être '-' ou '@stdin' pour lire l’entrée standard (par défaut).\n"
+        "\n"
+        "Ordre (par défaut = style maison assumé) :\n"
+        "  espaces < ponctuation < chiffres < lettres (structure d’abord)\n"
+        "  suites numériques naturelles (file2 < file10)\n"
+        "  lettres de base sans distinction de casse (apple ~ Apple), minuscules d’abord\n"
+        "  diacritiques comme critère secondaire (café près de cafe, pas après z)\n"
+        "  positions espagnoles/roumaines : n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (formes roumaines virgule/cedille égales)\n"
+        "\n"
+        "Options :\n"
+        "  -t, --field-separator <SEP>  Sépare chaque ligne par SEP (par défaut : ligne entière)\n"
+        "  -k, --key <N>                Trie selon le Nième champ ; égalité -> ligne entière\n"
+        "  -c, --code-point             Ordre pur des octets UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Déclare que l’entrée contient des nombres DÉCIMAUX.\n"
+        "                               SEP est la marque décimale, '.' (par défaut) ou\n"
+        "                               ','. Les séparateurs de groupes (espace, NBSP,\n"
+        "                               espace fine, ' _ et l’autre de . ,) sont alors\n"
+        "                               absorbés entre chiffres, donc\n"
+        "                               999,999.00 < 1,000,000.00 et les mêmes\n"
+        "                               valeurs s’ordonnent dans toute convention.\n"
+        "                               Par défaut, chaque '.' est un séparateur, donc\n"
+        "                               ordre de versions (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Reconnaît la notation scientifique et trie\n"
+        "                               par valeur (2e5 < 1e10). Les nombres simples\n"
+        "                               sont normalisés avec l’exposant 0. N’absorbe\n"
+        "                               pas les séparateurs de groupes.\n"
+        "  -n, --num, --numeric[=SEP]   Les deux ci-dessus : exposants ET\n"
+        "                               absorption des séparateurs de groupes.\n"
+        "      --roman                  Trie les chiffres romains entiers par valeur\n"
+        "                               (VII < IX). Jetons canoniques, de casse uniforme ;\n"
+        "                               MIX vaut légitimement 1009.\n"
+        "      --version-sort           Forme explicite du traitement des points par défaut\n"
+        "  -h, --help / --aide          Affiche cette aide\n"
+        "      --about                  Affiche version + plateforme sur une ligne\n"
+        "      --version                Affiche la version de la bibliothèque\n"
+        "      --lang / --langue <code> Langue d’interface (p. ex. en, fr) ; prévaut sur l’environnement\n"
+        "\n"
+        "Environnement :\n"
+        "  ROMANTIC_COLLATION_LANG      Langue d’interface (prévaut sur LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Séparateur de champ par défaut (remplacé par -t)\n",
+    },
+    [LANG_ES] = {
+        "es",
+        "--ayuda",
+        "--idioma",
+        "ordenación sin configuración regional y con criterio propio",
+        "collate — ordenación de líneas rápida, con criterio propio, reproducible y sin configuración regional\n"
+        "\n"
+        "Uso:\n"
+        "  collate [OPCIONES] [ARCHIVO]\n"
+        "\n"
+        "Lee líneas de ARCHIVO (o de la entrada estándar) y las escribe ordenadas en la salida estándar.\n"
+        "ARCHIVO puede ser '-' o '@stdin' para leer la entrada estándar (valor predeterminado).\n"
+        "\n"
+        "Orden (predeterminado = estilo propio):\n"
+        "  espacios < puntuación < dígitos < letras (primero la estructura)\n"
+        "  secuencias numéricas naturales (file2 < file10)\n"
+        "  letras base sin distinguir mayúsculas (apple ~ Apple), minúsculas primero\n"
+        "  diacríticos como desempate secundario (café cerca de cafe, no tras z)\n"
+        "  posiciones españolas/rumanas: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (las formas rumanas con coma/cedilla son iguales)\n"
+        "\n"
+        "Opciones:\n"
+        "  -t, --field-separator <SEP>  Divide cada línea por SEP (predeterminado: línea completa)\n"
+        "  -k, --key <N>                Ordena por el N.º campo; empate -> línea completa\n"
+        "  -c, --code-point             Orden puro de bytes UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Declara que la entrada contiene números DECIMALES.\n"
+        "                               SEP es la marca decimal, '.' (predeterminada) o\n"
+        "                               ','. Los separadores de grupos (espacio, NBSP,\n"
+        "                               espacio fino, ' _ y el otro de . ,) se\n"
+        "                               absorben entre dígitos, por lo que\n"
+        "                               999,999.00 < 1,000,000.00 y los mismos\n"
+        "                               valores se ordenan igual en toda convención.\n"
+        "                               Predeterminado: cada '.' es separador y da\n"
+        "                               orden de versión (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Reconoce notación científica y ordena\n"
+        "                               por valor (2e5 < 1e10). Los números sin\n"
+        "                               exponente se normalizan a exponente 0. No\n"
+        "                               absorbe separadores de grupos.\n"
+        "  -n, --num, --numeric[=SEP]   Ambos anteriores: exponentes Y\n"
+        "                               absorción de separadores de grupos.\n"
+        "      --roman                  Ordena números romanos de token completo por valor\n"
+        "                               (VII < IX). Solo tokens canónicos de una caja;\n"
+        "                               MIX vale legítimamente 1009.\n"
+        "      --version-sort           Forma explícita del tratamiento de puntos predeterminado\n"
+        "  -h, --help / --ayuda         Muestra esta ayuda\n"
+        "      --about                  Muestra versión + plataforma en una línea\n"
+        "      --version                Muestra la versión de la biblioteca\n"
+        "      --lang / --idioma <code> Idioma de la interfaz (p. ej. en, es); prevalece sobre el entorno\n"
+        "\n"
+        "Entorno:\n"
+        "  ROMANTIC_COLLATION_LANG      Idioma de la interfaz (prevalece sobre LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Separador de campo predeterminado (anulado por -t)\n",
+    },
+    [LANG_IT] = {
+        "it",
+        "--aiuto",
+        "--lingua",
+        "collazione indipendente dalla locale e con criterio proprio",
+        "collate — ordinamento di righe rapido, con criterio proprio, riproducibile e indipendente dalla locale\n"
+        "\n"
+        "Uso:\n"
+        "  collate [OPZIONI] [FILE]\n"
+        "\n"
+        "Legge le righe da FILE (o dallo standard input) e le scrive ordinate sullo standard output.\n"
+        "FILE può essere '-' o '@stdin' per leggere lo standard input (predefinito).\n"
+        "\n"
+        "Ordinamento (predefinito = stile proprio):\n"
+        "  spazi < punteggiatura < cifre < lettere (prima la struttura)\n"
+        "  sequenze numeriche naturali (file2 < file10)\n"
+        "  lettere base senza distinzione di maiuscole (apple ~ Apple), minuscole prima\n"
+        "  diacritici come spareggio secondario (café vicino a cafe, non dopo z)\n"
+        "  posizioni spagnole/rumene: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (le forme rumene con virgola/cediglia sono uguali)\n"
+        "\n"
+        "Opzioni:\n"
+        "  -t, --field-separator <SEP>  Divide ogni riga con SEP (predefinito: riga intera)\n"
+        "  -k, --key <N>                Ordina per l’N-esimo campo; parità -> riga intera\n"
+        "  -c, --code-point             Ordine puro dei byte UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Dichiara che l’input contiene numeri DECIMALI.\n"
+        "                               SEP è il separatore decimale, '.' (predefinito) o\n"
+        "                               ','. I separatori di gruppo (spazio, NBSP,\n"
+        "                               spazio sottile, ' _ e l’altro tra . ,) vengono\n"
+        "                               assorbiti tra cifre, quindi\n"
+        "                               999,999.00 < 1,000,000.00 e gli stessi\n"
+        "                               valori si ordinano uguali in ogni convenzione.\n"
+        "                               Predefinito: ogni '.' è un separatore e dà\n"
+        "                               ordine di versione (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Riconosce la notazione scientifica e ordina\n"
+        "                               per valore (2e5 < 1e10). I numeri semplici\n"
+        "                               sono normalizzati con esponente 0. Non assorbe\n"
+        "                               separatori di gruppo.\n"
+        "  -n, --num, --numeric[=SEP]   Entrambi: esponenti E\n"
+        "                               assorbimento dei separatori di gruppo.\n"
+        "      --roman                  Ordina i numeri romani a token intero per valore\n"
+        "                               (VII < IX). Solo token canonici a caso uniforme;\n"
+        "                               MIX vale legittimamente 1009.\n"
+        "      --version-sort           Forma esplicita della gestione predefinita dei punti\n"
+        "  -h, --help / --aiuto         Mostra questo aiuto\n"
+        "      --about                  Mostra versione + piattaforma su una riga\n"
+        "      --version                Mostra la versione della libreria\n"
+        "      --lang / --lingua <code> Lingua dell’interfaccia (es. en, it); prevale sull’ambiente\n"
+        "\n"
+        "Ambiente:\n"
+        "  ROMANTIC_COLLATION_LANG      Lingua dell’interfaccia (prevale su LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Separatore di campo predefinito (sostituito da -t)\n",
+    },
+    [LANG_PT_BR] = {
+        "pt_br",
+        "--ajuda",
+        "--linguagem",
+        "ordenação independente da configuração regional e com critério próprio",
+        "collate — ordenação de linhas rápida, com critério próprio, reproduzível e independente da configuração regional\n"
+        "\n"
+        "Uso:\n"
+        "  collate [OPÇÕES] [ARQUIVO]\n"
+        "\n"
+        "Lê linhas de ARQUIVO (ou da entrada padrão) e as escreve ordenadas na saída padrão.\n"
+        "ARQUIVO pode ser '-' ou '@stdin' para ler a entrada padrão (padrão).\n"
+        "\n"
+        "Ordenação (padrão = estilo próprio):\n"
+        "  espaços < pontuação < dígitos < letras (estrutura primeiro)\n"
+        "  sequências numéricas naturais (file2 < file10)\n"
+        "  letras base sem distinção de maiúsculas (apple ~ Apple), minúsculas primeiro\n"
+        "  diacríticos como desempate secundário (café perto de cafe, não depois de z)\n"
+        "  posições espanholas/romenas: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (as formas romenas com vírgula/cedilha são iguais)\n"
+        "\n"
+        "Opções:\n"
+        "  -t, --field-separator <SEP>  Separa cada linha por SEP (padrão: linha inteira)\n"
+        "  -k, --key <N>                Ordena pelo N.º campo; empate -> linha inteira\n"
+        "  -c, --code-point             Ordem pura de bytes UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Declara que a entrada contém números DECIMAIS.\n"
+        "                               SEP é a marca decimal, '.' (padrão) ou\n"
+        "                               ','. Separadores de grupos (espaço, NBSP,\n"
+        "                               espaço fino, ' _ e o outro de . ,) são\n"
+        "                               absorvidos entre dígitos, portanto\n"
+        "                               999,999.00 < 1,000,000.00 e os mesmos\n"
+        "                               valores ordenam de igual modo em qualquer convenção.\n"
+        "                               Padrão: cada '.' é separador, dando\n"
+        "                               ordem de versões (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Reconhece notação científica e ordena\n"
+        "                               por valor (2e5 < 1e10). Números simples são\n"
+        "                               normalizados com expoente 0. Não absorve\n"
+        "                               separadores de grupos.\n"
+        "  -n, --num, --numeric[=SEP]   Ambos: expoentes E\n"
+        "                               absorção de separadores de grupos.\n"
+        "      --roman                  Ordena numerais romanos de token inteiro por valor\n"
+        "                               (VII < IX). Apenas tokens canônicos de uma só caixa;\n"
+        "                               MIX vale legitimamente 1009.\n"
+        "      --version-sort           Forma explícita do tratamento padrão dos pontos\n"
+        "  -h, --help / --ajuda         Mostra esta ajuda\n"
+        "      --about                  Mostra versão + plataforma numa linha\n"
+        "      --version                Mostra a versão da biblioteca\n"
+        "      --lang / --linguagem <code> Idioma da interface (ex.: en, pt_br); prevalece sobre o ambiente\n"
+        "\n"
+        "Ambiente:\n"
+        "  ROMANTIC_COLLATION_LANG      Idioma da interface (prevalece sobre LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Separador de campo padrão (substituído por -t)\n",
+    },
+    [LANG_CA] = {
+        "ca",
+        "--ajut",
+        "--llengua",
+        "ordenació sense configuració regional i amb criteri propi",
+        "collate — ordenació de línies ràpida, amb criteri propi, reproduïble i sense configuració regional\n"
+        "\n"
+        "Ús:\n"
+        "  collate [OPCIONS] [FITXER]\n"
+        "\n"
+        "Llegeix línies de FITXER (o de l’entrada estàndard) i les escriu ordenades a la sortida estàndard.\n"
+        "FITXER pot ser '-' o '@stdin' per llegir l’entrada estàndard (per defecte).\n"
+        "\n"
+        "Ordre (per defecte = estil propi):\n"
+        "  espais < puntuació < dígits < lletres (primer l’estructura)\n"
+        "  seqüències numèriques naturals (file2 < file10)\n"
+        "  lletres base sense distingir majúscules (apple ~ Apple), minúscules primer\n"
+        "  diacrítics com a desempat secundari (café prop de cafe, no després de z)\n"
+        "  posicions espanyoles/romaneses: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (les formes romaneses de coma/cedilla són iguals)\n"
+        "\n"
+        "Opcions:\n"
+        "  -t, --field-separator <SEP>  Separa cada línia per SEP (per defecte: línia sencera)\n"
+        "  -k, --key <N>                Ordena pel N-èsim camp; empat -> línia sencera\n"
+        "  -c, --code-point             Ordre pur de bytes UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Declara que l’entrada conté nombres DECIMALS.\n"
+        "                               SEP és la marca decimal, '.' (per defecte) o\n"
+        "                               ','. Els separadors de grup (espai, NBSP,\n"
+        "                               espai fi, ' _ i l’altre de . ,) s’absorbeixen\n"
+        "                               entre dígits; així\n"
+        "                               999,999.00 < 1,000,000.00 i els mateixos\n"
+        "                               valors s’ordenen igual en tota convenció.\n"
+        "                               Per defecte, cada '.' és separador i dóna\n"
+        "                               ordre de versions (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Reconeix notació científica i ordena\n"
+        "                               per valor (2e5 < 1e10). Els nombres simples\n"
+        "                               es normalitzen amb exponent 0. No absorbeix\n"
+        "                               separadors de grup.\n"
+        "  -n, --num, --numeric[=SEP]   Tots dos: exponents I\n"
+        "                               absorció de separadors de grup.\n"
+        "      --roman                  Ordena numerals romans de token sencer per valor\n"
+        "                               (VII < IX). Només tokens canònics de caixa uniforme;\n"
+        "                               MIX val legítimament 1009.\n"
+        "      --version-sort           Forma explícita del tractament de punts per defecte\n"
+        "  -h, --help / --ajut          Mostra aquesta ajuda\n"
+        "      --about                  Mostra versió + plataforma en una línia\n"
+        "      --version                Mostra la versió de la biblioteca\n"
+        "      --lang / --llengua <code> Llengua de la interfície (p. ex. en, ca); preval sobre l’entorn\n"
+        "\n"
+        "Entorn:\n"
+        "  ROMANTIC_COLLATION_LANG      Llengua de la interfície (preval sobre LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Separador de camp per defecte (anul·lat per -t)\n",
+    },
+    [LANG_RO] = {
+        "ro",
+        "--ajutor",
+        "--limba",
+        "sortare fără configurare regională și cu reguli proprii",
+        "collate — sortare de linii rapidă, cu reguli proprii, reproductibilă și fără configurare regională\n"
+        "\n"
+        "Utilizare:\n"
+        "  collate [OPȚIUNI] [FIȘIER]\n"
+        "\n"
+        "Citește linii din FIȘIER (sau de la intrarea standard) și le scrie sortate la ieșirea standard.\n"
+        "FIȘIER poate fi '-' sau '@stdin' pentru intrarea standard (implicit).\n"
+        "\n"
+        "Ordine (implicit = stilul propriu):\n"
+        "  spații < punctuație < cifre < litere (mai întâi structura)\n"
+        "  secvențe numerice naturale (file2 < file10)\n"
+        "  litere de bază fără diferențierea majusculelor (apple ~ Apple), minuscule mai întâi\n"
+        "  diacritice ca departajare secundară (café lângă cafe, nu după z)\n"
+        "  poziții spaniole/românești: n < ñ < o; a < ă < â < b; i < î < j;\n"
+        "    s < ș < t; t < ț < u (formele românești cu virgulă/cedilă sunt egale)\n"
+        "\n"
+        "Opțiuni:\n"
+        "  -t, --field-separator <SEP>  Desparte fiecare linie la SEP (implicit: linia întreagă)\n"
+        "  -k, --key <N>                Sortează după al N-lea câmp; egalitate -> linia întreagă\n"
+        "  -c, --code-point             Ordine pură de octeți UTF-8 (== LC_ALL=C sort)\n"
+        "  -d, --decimal[=SEP]          Declară că intrarea conține numere ZECIMALE.\n"
+        "                               SEP este semnul zecimal, '.' (implicit) sau\n"
+        "                               ','. Separatorii de grup (spațiu, NBSP,\n"
+        "                               spațiu îngust, ' _ și celălalt dintre . ,) sunt\n"
+        "                               absorbiți între cifre, astfel\n"
+        "                               999,999.00 < 1,000,000.00 și aceleași\n"
+        "                               valori se ordonează la fel în orice convenție.\n"
+        "                               Implicit, fiecare '.' este separator și dă\n"
+        "                               ordine de versiune (1.9 < 1.10).\n"
+        "  -s, --sci, --scientific[=SEP]  Recunoaște notația științifică și sortează\n"
+        "                               după valoare (2e5 < 1e10). Numerele simple\n"
+        "                               sunt normalizate cu exponentul 0. Nu absoarbe\n"
+        "                               separatorii de grup.\n"
+        "  -n, --num, --numeric[=SEP]   Ambele de mai sus: exponenți ȘI\n"
+        "                               absorbția separatorilor de grup.\n"
+        "      --roman                  Sortează numere romane formate dintr-un token după valoare\n"
+        "                               (VII < IX). Doar tokeni canonici de aceeași literă;\n"
+        "                               MIX este legitim 1009.\n"
+        "      --version-sort           Forma explicită a tratării implicite a punctelor\n"
+        "  -h, --help / --ajutor        Afișează acest ajutor\n"
+        "      --about                  Afișează versiunea + platforma pe o linie\n"
+        "      --version                Afișează versiunea bibliotecii\n"
+        "      --lang / --limba <code>  Limba interfeței (de ex. en, ro); are prioritate față de mediu\n"
+        "\n"
+        "Mediu:\n"
+        "  ROMANTIC_COLLATION_LANG      Limba interfeței (are prioritate față de LANG/LC_*)\n"
+        "  COLLATE_FIELD_SEP            Separator de câmp implicit (înlocuit de -t)\n",
+    },
 };
 
-/* Map a locale code (bare "de" or "de_DE.UTF-8" etc.) to a supported lang by
- * its leading language subtag (longest-match is unnecessary at 2 locales).
+/* Map a locale code (bare "de" or "pt_BR.UTF-8" etc.) to a supported lang.
+ * Normalize '-' and '_' to the canonical underscore form, preserve all language
+ * subtags through the encoding/modifier suffix, then match the complete code.
+ * This prevents pt_PT from accidentally selecting the pt_br catalog.
  * Returns 1 and sets *out on match; 0 if unsupported. */
 static int lang_from_code(const char *code, lang_t *out) {
     if (!code || !code[0]) return 0;
-    char buf[8];
+    char buf[16];
     size_t n = 0;
     while (code[n] && n < sizeof(buf) - 1 &&
-           code[n] != '_' && code[n] != '-' && code[n] != '.' && code[n] != '@') {
-        buf[n] = (char)tolower((unsigned char)code[n]);
+           code[n] != '.' && code[n] != '@') {
+        unsigned char c = (unsigned char)code[n];
+        buf[n] = (c == '-' || c == '_') ? '_' : (char)tolower(c);
         n++;
     }
     buf[n] = '\0';
     for (int i = 0; i < LANG_COUNT; i++) {
         if (strcmp(buf, MESSAGES[i].code) == 0) { *out = (lang_t)i; return 1; }
+    }
+    /* A simple catalog accepts normal regional spellings such as de_DE. Do
+     * this only after the full match, so pt_BR reaches pt_br while pt_PT does
+     * not silently select it. */
+    char *subtag = strchr(buf, '_');
+    if (subtag) {
+        *subtag = '\0';
+        for (int i = 0; i < LANG_COUNT; i++) {
+            if (strcmp(buf, MESSAGES[i].code) == 0) { *out = (lang_t)i; return 1; }
+        }
+    }
+    return 0;
+}
+
+/* Localized aliases live beside their catalog so a new locale cannot drift into
+ * an unhandled parser branch. The English canonical names stay in main's
+ * explicit branches and never infer a non-English UI language. */
+static int localized_help_alias(const char *arg, lang_t *out) {
+    for (int i = LANG_EN + 1; i < LANG_COUNT; i++) {
+        if (MESSAGES[i].help_alias && strcmp(arg, MESSAGES[i].help_alias) == 0) {
+            *out = (lang_t)i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Return 1 for a detached localized language option and 2 for its =VALUE form.
+ * The catalog's own locale is inferred in either case; an explicit value still
+ * wins later, matching the normal --lang precedence rule. */
+static int localized_lang_option(const char *arg, lang_t *out, const char **value) {
+    for (int i = LANG_EN + 1; i < LANG_COUNT; i++) {
+        const char *alias = MESSAGES[i].lang_alias;
+        if (!alias) continue;
+        size_t n = strlen(alias);
+        if (strcmp(arg, alias) == 0) {
+            *out = (lang_t)i;
+            *value = NULL;
+            return 1;
+        }
+        if (strncmp(arg, alias, n) == 0 && arg[n] == '=') {
+            *out = (lang_t)i;
+            *value = arg + n + 1;
+            return 2;
+        }
     }
     return 0;
 }
@@ -445,28 +831,36 @@ int main(int argc, char *argv[]) {
         }
         if (!only_switches && a[0] == '-' && a[1] != '\0' &&
             !(strcmp(a, "-") == 0)) {
+            lang_t localized_lang;
+            const char *localized_value;
+            int localized_lang_form = localized_lang_option(
+                a, &localized_lang, &localized_value);
             if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
                 want_help = 1;
-            } else if (strcmp(a, "--hilfe") == 0) {
-                /* German help alias: infers German UI (an explicit --lang still
-                 * wins). Aliases like this must stay disjoint from every English
-                 * canonical option name (see the i18n skill's collision rule). */
+            } else if (localized_help_alias(a, &localized_lang)) {
+                /* A localized help alias infers that catalog; an explicit --lang
+                 * still wins. Alias names must stay disjoint from English
+                 * canonical option names (see the i18n skill's collision rule). */
                 want_help = 1;
-                if (!inferred_lang) inferred_lang = "de";
+                if (!inferred_lang) inferred_lang = MESSAGES[localized_lang].code;
             } else if (strcmp(a, "--about") == 0) {
                 want_about = 1;
             } else if (strcmp(a, "--version") == 0) {
                 want_version = 1;
-            } else if (strcmp(a, "--lang") == 0 || strcmp(a, "--sprache") == 0) {
+            } else if (strcmp(a, "--lang") == 0 || localized_lang_form == 1) {
                 if (i + 1 >= argc) {
                     fprintf(stderr, "collate: %s requires a language code\n", a);
                     return 2;
                 }
                 lang_code = argv[++i];
+                if (localized_lang_form == 1 && !inferred_lang) {
+                    inferred_lang = MESSAGES[localized_lang].code;
+                }
             } else if (strncmp(a, "--lang=", 7) == 0) {
                 lang_code = a + 7;
-            } else if (strncmp(a, "--sprache=", 10) == 0) {
-                lang_code = a + 10;
+            } else if (localized_lang_form == 2) {
+                lang_code = localized_value;
+                if (!inferred_lang) inferred_lang = MESSAGES[localized_lang].code;
             } else if (strcmp(a, "-c") == 0 || strcmp(a, "--code-point") == 0) {
                 options |= RCOL_CODE_POINT;
             } else if (strcmp(a, "-d") == 0 || strcmp(a, "--decimal") == 0
