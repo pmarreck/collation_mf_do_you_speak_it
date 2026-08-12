@@ -87,11 +87,11 @@ const D_CARON: u8 = 8;
 const D_MACRON: u8 = 9;
 const D_DOT: u8 = 10;
 const D_STROKE: u8 = 11;
-// Ranks below are APPENDED deliberately: new ranks never perturb the existing
-// relative order, because every code point that uses one was previously absent
-// from the table entirely (it fell through to CLASS_OTHER).
+// These ranks were added for recognized Latin coverage. Some also select a
+// global primary slot in letterPrimaryRank; their secondary values still keep
+// unrelated accented forms in a total, deterministic order.
 const D_BREVE: u8 = 12; // Romanian ă
-const D_COMMA: u8 = 13; // Romanian ș/ț (comma-below, distinct from cedilla)
+const D_COMMA: u8 = 13; // Romanian ș/ț, including legacy cedilla spellings
 const D_MIDDOT: u8 = 14; // Catalan ŀ
 
 // Tertiary (case) weights.
@@ -227,10 +227,10 @@ fn foldLetter(cp: u21) ?Letter {
         0x021B => .{ .base = 't', .dia = D_COMMA, .upper = false },
         // The cedilla spellings Ş/ş/Ţ/ţ are pervasively (if incorrectly) used
         // for Romanian on legacy systems, so fold them to the same bases.
-        0x015E => .{ .base = 's', .dia = D_CEDILLA, .upper = true },
-        0x015F => .{ .base = 's', .dia = D_CEDILLA, .upper = false },
-        0x0162 => .{ .base = 't', .dia = D_CEDILLA, .upper = true },
-        0x0163 => .{ .base = 't', .dia = D_CEDILLA, .upper = false },
+        0x015E => .{ .base = 's', .dia = D_COMMA, .upper = true },
+        0x015F => .{ .base = 's', .dia = D_COMMA, .upper = false },
+        0x0162 => .{ .base = 't', .dia = D_COMMA, .upper = true },
+        0x0163 => .{ .base = 't', .dia = D_COMMA, .upper = false },
 
         // ── Catalan: ŀ is the first half of the ŀl digraph, which collates as
         // plain "ll"; folding to a bare 'l' gets that for free. ──
@@ -462,7 +462,7 @@ fn emitExpansion(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, rep: []con
         }
         const c = rep[k];
         if (foldLetter(c)) |lt| {
-            try pushLetterPrimary(l1, alloc, lt.base);
+            try pushLetterPrimary(l1, alloc, lt.base, lt.dia);
             try l2.append(alloc, WEIGHT_BASE + lt.dia);
             try l3.append(alloc, if (lt.upper) CASE_UPPER_LIG else CASE_LOWER_LIG);
         } else {
@@ -483,12 +483,51 @@ fn isSpace(cp: u21) bool {
     };
 }
 
+/// Return the byte length of a below-mark that Romanian legacy data uses for
+/// `s`/`t`. Consuming it with the base keeps decomposed spellings one element.
+fn romanianBelowMarkLen(s: []const u8, start: usize) usize {
+    if (start >= s.len) return 0;
+    const lead = s[start];
+    const len = std.unicode.utf8ByteSequenceLength(lead) catch return 0;
+    if (len == 1 or start + len > s.len) return 0;
+    const cp = std.unicode.utf8Decode(s[start .. start + len]) catch return 0;
+    return switch (cp) {
+        0x0326, // COMBINING COMMA BELOW
+        0x0327, // COMBINING CEDILLA
+        => len,
+        else => 0,
+    };
+}
+
 const L1 = std.ArrayListUnmanaged(u8);
 
-/// Append the primary bytes for a recognized letter (class + base weight).
-fn pushLetterPrimary(l1: *L1, alloc: std.mem.Allocator, base: u8) !void {
+/// Return the global house alphabet position for a folded letter. The inserted
+/// Spanish and Romanian letters occupy primary slots, while all other accents
+/// keep their base letter's position and resolve at secondary level.
+fn letterPrimaryRank(base: u8, dia: u8) u8 {
+    var rank = base - 'a';
+    if (base > 'a') rank += 2; // ă, â
+    if (base > 'i') rank += 1; // î
+    if (base > 'n') rank += 1; // ñ
+    if (base > 's') rank += 1; // ș
+    if (base > 't') rank += 1; // ț
+    return switch (base) {
+        'a' => switch (dia) {
+            D_BREVE => rank + 1,
+            D_CIRCUMFLEX => rank + 2,
+            else => rank,
+        },
+        'i' => if (dia == D_CIRCUMFLEX) rank + 1 else rank,
+        'n' => if (dia == D_TILDE) rank + 1 else rank,
+        's', 't' => if (dia == D_COMMA) rank + 1 else rank,
+        else => rank,
+    };
+}
+
+/// Append the primary bytes for a recognized letter (class + alphabet weight).
+fn pushLetterPrimary(l1: *L1, alloc: std.mem.Allocator, base: u8, dia: u8) !void {
     try l1.append(alloc, CLASS_LETTER);
-    try l1.append(alloc, WEIGHT_BASE + (base - 'a')); // 'a'->0x02 .. 'z'->0x1B
+    try l1.append(alloc, WEIGHT_BASE + letterPrimaryRank(base, dia));
 }
 
 /// Longest significant-digit count expressible in the single-byte short-form
@@ -1069,7 +1108,7 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
                 // the number 50 and "CIVIC" with 100, inverting the two.
                 for (s[i..j]) |c| {
                     const lt = foldLetter(c).?; // ASCII letters always fold
-                    try pushLetterPrimary(&l1, alloc, lt.base);
+                    try pushLetterPrimary(&l1, alloc, lt.base, lt.dia);
                     try l2.append(alloc, WEIGHT_BASE + lt.dia);
                     try l3.append(alloc, if (lt.upper) CASE_UPPER else CASE_LOWER);
                 }
@@ -1110,10 +1149,21 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
             try l1.append(alloc, CLASS_WS);
             try l2.append(alloc, WEIGHT_BASE + D_NONE);
             try l3.append(alloc, CASE_NEUTRAL);
-        } else if (foldLetter(cp)) |lt| {
-            try pushLetterPrimary(&l1, alloc, lt.base);
+        } else if (foldLetter(cp)) |raw_lt| {
+            var lt = raw_lt;
+            var consumed = adv;
+            if ((lt.base == 's' or lt.base == 't') and lt.dia == D_NONE) {
+                const mark_len = romanianBelowMarkLen(s, i + adv);
+                if (mark_len != 0) {
+                    lt.dia = D_COMMA;
+                    consumed += mark_len;
+                }
+            }
+            try pushLetterPrimary(&l1, alloc, lt.base, lt.dia);
             try l2.append(alloc, WEIGHT_BASE + lt.dia);
             try l3.append(alloc, if (lt.upper) CASE_UPPER else CASE_LOWER);
+            i += consumed;
+            continue;
         } else if (compatExpand(cp)) |rep| {
             // N elements from one code point. Every level must receive the same
             // count the spelled-out form produces, or the two stop sorting
@@ -1285,6 +1335,39 @@ test "house: NFC precomposed accents fold to a base letter" {
     // Precomposed é (U+00E9) sorts as base 'e' — right after 'e', before 'f'.
     try expectOrder(h, "é", "f");
     try expectOrder(h, "d", "é");
+}
+
+test "house: Spanish and Romanian letters have their global alphabet positions" {
+    const h: u32 = 0;
+    // Spanish ñ is a primary letter after n, rather than an n accent.
+    try expectOrder(h, "nob", "ñaa");
+    try expectOrder(h, "ño", "o");
+
+    // Romanian's five primary-letter insertions. Accent-only variants of the
+    // surrounding ASCII letters remain at their base positions.
+    try expectOrder(h, "az", "ăa");
+    try expectOrder(h, "ăz", "âa");
+    try expectOrder(h, "âz", "ba");
+    try expectOrder(h, "iz", "îa");
+    try expectOrder(h, "îz", "ja");
+    try expectOrder(h, "sz", "șa");
+    try expectOrder(h, "șz", "ta");
+    try expectOrder(h, "tz", "ța");
+    try expectOrder(h, "țz", "ua");
+}
+
+test "house: Romanian comma-below, cedilla, and decomposed forms canonicalize" {
+    const h: u32 = 0;
+    for ([_][4][]const u8{
+        .{ "ș", "ş", "s\u{0326}", "s\u{0327}" },
+        .{ "ț", "ţ", "t\u{0326}", "t\u{0327}" },
+        .{ "Ș", "Ş", "S\u{0326}", "S\u{0327}" },
+        .{ "Ț", "Ţ", "T\u{0326}", "T\u{0327}" },
+    }) |spellings| {
+        for (spellings[1..]) |other| {
+            try testing.expectEqual(@as(i32, 0), try compareAlloc(testing.allocator, h, spellings[0], other));
+        }
+    }
 }
 
 // ── Phase 5: unbounded numeric runs (arbitrary-precision collation) ──
@@ -2068,20 +2151,12 @@ test "house: ligature primary weight equals the spelled-out digraph" {
     }
 }
 
-test "house: Romanian ă/ș/ț fold to base letters, not CLASS_OTHER" {
-    const h: u32 = 0;
-    // Base letter must dominate: previously these fell through to CLASS_OTHER
-    // (0x50 > CLASS_LETTER 0x40) and sorted after EVERY letter.
-    try expectOrder(h, "ăb", "az"); // base 'a' run, 'b' < 'z'
-    try expectOrder(h, "șa", "tz"); // base 's' < base 't'
-    try expectOrder(h, "ța", "uz"); // base 't' < base 'u'
-    // ...and the diacritic is only the secondary tie-break.
-    try expectOrder(h, "sapa", "șapa");
-    try expectOrder(h, "tara", "țara");
-    try expectOrder(h, "acas", "acăs");
-    // The cedilla spellings commonly used for Romanian ș/ț fold too.
-    try expectOrder(h, "sa", "şa");
-    try expectOrder(h, "ta", "ţa");
+test "house: Romanian letters and legacy spellings stay letter-class" {
+    // These used to fall through to CLASS_OTHER (after every letter). Their
+    // primary positions and canonical equivalence are asserted above.
+    for ([_][]const u8{ "ă", "â", "î", "ș", "ț", "ş", "ţ", "s\u{0326}", "t\u{0326}", "Ș", "Ț", "S\u{0326}", "T\u{0326}" }) |s| {
+        try testing.expect(try collatesAsLetter(s));
+    }
 }
 
 test "house: Catalan ŀ folds to plain 'l' so ŀl sorts as ll" {

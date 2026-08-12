@@ -122,6 +122,24 @@ test "ffi: open/strcoll8/close round trip (house style)" {
     try testing.expectEqual(@as(i32, 1), rcol_strcoll8(coll, b.ptr, b.len, a.ptr, a.len));
 }
 
+test "ffi: Romanian canonical spellings compare equal" {
+    const coll = rcol_open(0) orelse return error.OpenFailed;
+    defer rcol_close(coll);
+    for ([_][4][]const u8{
+        .{ "ș", "ş", "s\u{0326}", "s\u{0327}" },
+        .{ "ț", "ţ", "t\u{0326}", "t\u{0327}" },
+        .{ "Ș", "Ş", "S\u{0326}", "S\u{0327}" },
+        .{ "Ț", "Ţ", "T\u{0326}", "T\u{0327}" },
+    }) |spellings| {
+        for (spellings[1..]) |other| {
+            try testing.expectEqual(
+                @as(i32, 0),
+                rcol_strcoll8(coll, spellings[0].ptr, spellings[0].len, other.ptr, other.len),
+            );
+        }
+    }
+}
+
 test "ffi: get_sort_key memcmp order matches strcoll8" {
     const coll = rcol_open(0) orelse return error.OpenFailed;
     defer rcol_close(coll);

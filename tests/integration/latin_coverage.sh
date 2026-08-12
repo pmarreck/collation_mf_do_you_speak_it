@@ -106,12 +106,12 @@ assert_order "fraction denominators numeric" ⅑ ⅒
 assert_order "letterlike TM" TM ™ TN
 assert_order "letterlike No" No № Np
 
-echo "── Romanian letters fold to their base ──"
-assert_order "Romanian ă base a"  ăb az
-assert_order "Romanian ș base s"  șa tz
-assert_order "Romanian ț base t"  ța uz
-assert_order "Romanian secondary" sapa șapa
-assert_order "Romanian cedilla"   ta ţa
+echo "── Spanish and Romanian primary letters ──"
+assert_order "Spanish ñ after n"       nob ñaa ño o
+assert_order "Romanian a letters"      az ăa ăz âa âz ba
+assert_order "Romanian i letter"       iz îa îz ja
+assert_order "Romanian s letter"       sz șa șz ta
+assert_order "Romanian t letter"       tz ța țz ua
 
 echo "── Catalan ŀl collates as ll ──"
 assert_order "Catalan ŀ base l"   cella ceŀla cellb

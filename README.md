@@ -41,16 +41,20 @@ In priority order:
    **[docs/NUMERIC.md](docs/NUMERIC.md)**.
 3. **Case-insensitive base letters.** `apple` and `Apple` are adjacent, not
    split into "all-uppercase-then-all-lowercase".
-4. **Diacritics as a secondary tie-break.** `café` sorts near `cafe`
+4. **Most diacritics as a secondary tie-break.** `café` sorts near `cafe`
    (base letter `e`), *not* dead-last like raw code points: `café < cafz`.
-5. **Case as the final tie-break.** lowercase before uppercase.
-6. **Ligatures expand.** `ß`→`ss`, `œ`→`oe`, `æ`→`ae`, `ĳ`→`ij`, so `straße`
+5. **Spanish and Romanian alphabet slots.** `n < ñ < o`; `a < ă < â < b`,
+   `i < î < j`, `s < ș < t`, and `t < ț < u`. Romanian comma-below, legacy
+   cedilla, and decomposed below-mark spellings compare equal.
+6. **Case as the final tie-break.** lowercase before uppercase.
+7. **Ligatures expand.** `ß`→`ss`, `œ`→`oe`, `æ`→`ae`, `ĳ`→`ij`, so `straße`
    lands next to `strasse` and `cœur` next to `coeur` instead of after every
    letter. The two stay distinguishable at the tertiary level, so the order
    remains total.
-7. **NFC-aware for common precomposed Latin accents** (v1 subset — see Limits).
-8. **No OS locale, ever.** Reproducible everywhere.
-9. **Code-point fallback** (`--code-point`) == pure UTF-8 byte order.
+8. **NFC-aware for common precomposed Latin accents**, with a targeted
+   Romanian below-mark canonicalization (v1 subset — see Limits).
+9. **No OS locale, ever.** Reproducible everywhere.
+10. **Code-point fallback** (`--code-point`) == pure UTF-8 byte order.
 
 ## Build & test
 
@@ -203,12 +207,11 @@ as a separate column and sort on it with `-t`/`-k`. That is what Japanese system
 actually do — it is why every Japanese form has a furigana field. Given
 `東京<TAB>とうきょう`, `collate -t$'\t' -k2` yields correct Japanese order.
 
-**One tailoring, not many.** The house style is a single global ordering, closest
-to Unicode's DUCET **root** / Western-European default. That makes it *native*
-for the Romance languages — accent-as-secondary is exactly the French, Spanish,
-Italian, Portuguese, and Catalan rule — and correct for German *dictionary*
-order. It is deliberately **non-native** for languages that treat accented forms
-as distinct letters at the primary level:
+**One evolving global Latin order.** The house style is a single versioned,
+compiled-in order, initially root-like but not frozen. It deliberately adopts
+Spanish `ñ` and Romanian `ă â î ș ț` as primary letters, including Romanian
+legacy and decomposed spellings. It remains non-native where one global order
+would need a conflicting case pairing, contraction, or alphabet rearrangement:
 
 | language | wants | we give |
 |---|---|---|
@@ -218,23 +221,23 @@ as distinct letters at the primary level:
 | Hungarian | `cs dz dzs gy ly ny sz ty zs` as letters | not contracted |
 | Estonian, Latvian, Lithuanian | reordered alphabets (`z` mid-alphabet in `et`) | base order |
 | Turkish | dotless `ı` distinct from `i` | `ı` uncovered entirely |
-| Spanish | `ñ` a letter after `n` | folded to base `n` |
 | Canadian French (`fr-CA`) | accents compared *backwards* | forward |
 
-This is a consequence of RULES.md #2 (never consult the OS locale), not an
-oversight — one linear order cannot satisfy Swedish and German simultaneously.
-Per-locale tailoring is the deferred fix. Note that broadening `æ`→`ae` in v1.1
-*removed* an accidental correctness for Danish/Norwegian, where `æ` previously
-landed after `z` by virtue of being unrecognized.
+This follows RULES.md #2 (never consult the OS locale). Future tailoring may
+address genuine conflicts, especially Turkish case pairs and Hungarian ASCII
+contractions. Note that broadening `æ`→`ae` in v1.1 *removed* an accidental
+correctness for Danish/Norwegian, where `æ` previously landed after `z` by
+virtue of being unrecognized.
 
 - Latin coverage is complete for French, Spanish, Italian, Portuguese, Catalan,
   Romanian, German, and Dutch (verified as a set, both directions, by
   `tests/integration/latin_coverage.sh`). Icelandic `ð`/`þ` and the Nordic
   `ø`/`å`-as-letters are **not** covered. Unknown code points degrade gracefully
   to code-point order (sorted after known letters).
-- NFC handling covers common **precomposed** Latin accents; **decomposed**
-  combining-mark sequences are not yet folded (the combining mark is treated as
-  its own "other" element). Full normalization is deferred.
+- NFC handling covers common **precomposed** Latin accents. The targeted
+  exception is Romanian `s`/`t` plus combining comma-below or cedilla, which
+  canonicalizes with precomposed `ș`/`ț` and legacy `ş`/`ţ`. Full Unicode
+  normalization is deferred.
 - `strcoll8` builds temporary keys in an 8 KiB stack scratch buffer and falls
   back to the heap for oversized inputs. Precomputing sort keys still wins when
   each string is compared many times; SIMD/streaming compare is deferred.

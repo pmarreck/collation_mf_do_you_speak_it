@@ -216,7 +216,15 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 247 passed, 0 failed (83 Zig unit + 164 CLI integration).
+Current test count: 250 passed, 0 failed (86 Zig unit + 164 CLI integration).
+
+- [x] **Global Spanish and Romanian Latin order.** Peter established that the
+      house order remains deliberately mutable while the product is designed.
+      Added Spanish `n < ñ < o`; Romanian `a < ă < â < b`, `i < î < j`,
+      `s < ș < t`, and `t < ț < u`; and canonical equality for modern,
+      legacy-cedilla, and decomposed comma-below/cedilla Romanian `s`/`t`
+      spellings, upper and lower case. 250 local checks pass. Hungarian
+      contractions remain deferred. (2026-08-12 11:37 EDT)
 
 - [x] **Mechatron cutover to `romantic_collation`.** GitHub rename confirmed;
       the existing active push webhook survived. Repointed `origin`, pushed
@@ -233,6 +241,22 @@ Current test count: 247 passed, 0 failed (83 Zig unit + 164 CLI integration).
 
 ## Open follow-ups
 
+- [ ] **Evolve the global Latin house order deliberately.** The current
+      root-like behavior is provisional while the product is being designed;
+      evaluate regional preferences as candidates for the default whenever a
+      single documented ordering can express them. Change the default carefully
+      with full set-based language corpora and explicit examples of every
+      affected existing ordering. Reserve explicit tailorings only for genuine
+      contradictions, such as Turkish `I`/`ı` versus `i`/`İ` case pairing and
+      Hungarian ASCII contractions.
+      - [x] Put Spanish `ñ` after `n`, and Romanian `ă â î ș ț` at their
+            primary alphabet positions. *Poke: each must outrank a later base
+            letter before secondary accent weights are considered.*
+      - [x] Canonicalize Romanian comma-below, legacy cedilla, and decomposed
+            comma-below spellings for `s`/`t`. *Poke: consume the combining
+            mark as part of its base letter so key levels stay aligned.*
+      - [x] Defer Hungarian contractions pending a tailoring design. (Peter,
+            2026-08-12 EDT)
 - [ ] **Finish local rename cleanup.** The GitHub and Mechatron cutover is
       complete. If a local tmux session still has the old project name, rename it
       to `romantic_collation`.

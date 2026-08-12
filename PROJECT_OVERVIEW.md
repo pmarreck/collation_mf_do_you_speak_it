@@ -49,7 +49,8 @@ any consumer ──► C FFI (rcol_*) ──► pure Zig core (no I/O)
   from an input such that plain `memcmp` of two sort keys reproduces the desired
   comparison order. Computed once, compared many. Mirrors ICU `ucol_getSortKey`.
 - **House style**: the default opinionated order (structural-first, natural
-  numeric, case-insensitive base, diacritic secondary, case tertiary).
+  numeric, case-insensitive base, most diacritics secondary, selected global
+  Spanish/Romanian primary letters, case tertiary).
 - **Structural-first**: whitespace and punctuation sort BEFORE alphanumerics and
   are NOT ignored (the deliberate deviation from the Unicode Collation
   Algorithm, which makes punctuation ignorable). Yields "space before letters"
@@ -58,8 +59,9 @@ any consumer ──► C FFI (rcol_*) ──► pure Zig core (no I/O)
   byte order = `LC_ALL=C sort`.
 - **Collation element**: one unit of comparison — a folded letter, a digit run,
   a whitespace char, a punctuation char, or an "other" code point.
-- **Level (primary/secondary/tertiary)**: L1 = structural class + base letter;
-  L2 = diacritics; L3 = case. Compared in that priority order.
+- **Level (primary/secondary/tertiary)**: L1 = structural class + base letter
+  or selected alphabet slot; L2 = remaining diacritic distinction; L3 = case.
+  Compared in that priority order.
 
 ## Naming conventions
 

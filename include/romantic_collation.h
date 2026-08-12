@@ -29,7 +29,9 @@ extern "C" {
  *   - natural numeric runs ON (file2 < file10)
  *   - case-insensitive base letters (apple ~ Apple), case as final tie-break
  *     (lowercase before uppercase)
- *   - diacritics as a secondary tie-break (café near cafe, not after z)
+ *   - most diacritics as a secondary tie-break (café near cafe, not after z);
+ *     Spanish ñ and Romanian ă â î ș ț occupy documented primary positions
+ *   - Romanian ș/ț compare equal to legacy ş/ţ and decomposed below-mark forms
  */
 
 /* Pure UTF-8 byte / code-point order (== `LC_ALL=C sort`). The escape hatch.
