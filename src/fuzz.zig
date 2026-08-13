@@ -104,11 +104,19 @@ fn checkPair(alloc: std.mem.Allocator, opts: u32, a: []const u8, b: []const u8) 
     };
     if (key_order != ab) return error.KeyOrderDisagrees;
 
-    // 2. C-safe keys
-    for ([_][]const u8{ ka, kb }) |k| {
-        // Code-point mode's key IS the raw input, so an empty input yields an
-        // empty key and none of the structural guarantees below apply.
-        if (opts & collation.OPT_CODE_POINT != 0) continue;
+    // 2. C-safe keys. Code-point mode has the stronger exact-shape contract:
+    // raw input followed by the public API's trailing NUL.
+    for ([_]struct { key: []const u8, input: []const u8 }{
+        .{ .key = ka, .input = a },
+        .{ .key = kb, .input = b },
+    }) |item| {
+        const k = item.key;
+        if (opts & collation.OPT_CODE_POINT != 0) {
+            if (k.len != item.input.len + 1) return error.CodePointKeyLength;
+            if (!std.mem.eql(u8, k[0..item.input.len], item.input)) return error.CodePointKeyPayload;
+            if (k[k.len - 1] != 0) return error.KeyNotTerminated;
+            continue;
+        }
         if (k.len == 0) return error.EmptyKey;
         if (k[k.len - 1] != 0) return error.KeyNotTerminated;
         for (k[0 .. k.len - 1]) |byte| if (byte == 0) return error.InteriorNul;

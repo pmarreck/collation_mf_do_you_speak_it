@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 350 passed, 0 failed (87 Zig unit + 3 C unit + 260 CLI integration).
+Current test count: 353 passed, 0 failed (90 Zig unit + 3 C unit + 260 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -321,10 +321,15 @@ Current test count: 350 passed, 0 failed (87 Zig unit + 3 C unit + 260 CLI integ
             grouping behavior; RULES lists all eight catalogs; dead `g_coll`
             and the stale numeric comment are gone; the version string derives
             from its public numeric components. (2026-08-13 12:41 EDT)
-      - [ ] Strengthen the independent controls called out in the advisories:
-            folded-digit fuzz shapes, finite-table coverage, FFI truncation
-            contracts, and duplicated numeric encoding. *Poke: tests generated
-            from the implementation table are exhaustive but not independent.*
+      - [x] Strengthen the low-risk controls called out in the advisories: FFI
+            bounded-copy/`strxfrm` contracts, shared numeric encoding, and exact
+            code-point-key shape in the fuzzer. *Poke: identical numeric payloads
+            must include folded styles and zero.* Full 200,000-iteration fuzz
+            run passed 1,724,460 property checks. (2026-08-13 12:45 EDT)
+      - [ ] Add a semantically valid folded-digit fuzz shape and independent,
+            exhaustive expectations for the finite compatibility/letter tables.
+            *Poke: expectations generated from the implementation table are
+            exhaustive but not independent; derive them from Unicode data.*
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and

@@ -186,3 +186,42 @@ test "ffi: get_sort_key length probe (out=null, cap=0)" {
     const needed = rcol_get_sort_key(coll, s.ptr, s.len, null, 0);
     try testing.expect(needed > 0);
 }
+
+test "ffi: get_sort_key reports full length and copies every bounded prefix" {
+    const coll = rcol_open(0) orelse return error.OpenFailed;
+    defer rcol_close(coll);
+    const s = "file10";
+    var full: [128]u8 = undefined;
+    const needed = rcol_get_sort_key(coll, s.ptr, s.len, &full, full.len);
+    try testing.expect(needed > 1 and needed < full.len);
+
+    var partial: [128]u8 = undefined;
+    for (0..needed + 1) |cap| {
+        @memset(&partial, 0xAA);
+        try testing.expectEqual(
+            needed,
+            rcol_get_sort_key(coll, s.ptr, s.len, &partial, cap),
+        );
+        try testing.expectEqualSlices(u8, full[0..cap], partial[0..cap]);
+        if (cap < partial.len) try testing.expectEqual(@as(u8, 0xAA), partial[cap]);
+    }
+}
+
+test "ffi: POSIX strcoll and strxfrm contracts" {
+    try testing.expectEqual(@as(i32, -1), rcol_strcoll("file2", "file10"));
+    try testing.expectEqual(@as(i32, 1), rcol_strcoll("file10", "file2"));
+
+    const needed = rcol_strxfrm(null, "hello", 0);
+    try testing.expect(needed > 0);
+    var full: [128]u8 = undefined;
+    try testing.expectEqual(needed, rcol_strxfrm(&full, "hello", full.len));
+    try testing.expectEqual(@as(u8, 0), full[needed]);
+
+    var short = [_]u8{0xAA} ** 3;
+    try testing.expectEqual(needed, rcol_strxfrm(&short, "hello", short.len));
+    try testing.expectEqual(@as(u8, 0), short[short.len - 1]);
+
+    var one = [_]u8{0xAA};
+    try testing.expectEqual(needed, rcol_strxfrm(&one, "hello", one.len));
+    try testing.expectEqual(@as(u8, 0), one[0]);
+}

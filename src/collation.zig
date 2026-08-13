@@ -948,7 +948,7 @@ fn pushLeadingNegative(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: L
     try l3.append(alloc, leadingZeroWeight(n.digits));
 }
 
-/// Append the primary bytes for one ASCII digit run, length-prefixed with the
+/// Append the primary bytes for one folded digit run, length-prefixed with the
 /// count of significant digits so bytewise comparison matches numeric value
 /// (the natural-sort technique: fewer significant digits => smaller number).
 ///
@@ -962,49 +962,9 @@ fn pushLeadingNegative(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, n: L
 /// every emitted byte is >= 0x02, and the sigil is harvested from the TOP of the
 /// range (0xFF) because ordering wants it above all content, not in the middle.
 fn pushNumericPrimary(l1: *L1, alloc: std.mem.Allocator, run: []const u8) !void {
-    var start: usize = 0;
-    while (start < run.len) {
-        const d = digitAt(run, start) orelse break;
-        if (d.v != 0) break;
-        start += d.len;
-    }
-    const sig = run[start..]; // significant digits, no leading zeros (may be empty => value 0)
-    // Digits may be multi-byte once folded, so count code points, not bytes.
-    var sig_n: usize = 0;
-    var scan: usize = 0;
-    while (scan < sig.len) {
-        const d = digitAt(sig, scan) orelse break;
-        sig_n += 1;
-        scan += d.len;
-    }
     try l1.append(alloc, CLASS_DIGIT);
-    if (sig_n <= NUM_SHORT_MAX) {
-        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(sig_n)));
-    } else {
-        // Long form: NUM_ESCALATE, then how many base-254 digits the length
-        // needs, then the length itself big-endian. Ordering holds at each step:
-        // the sigil beats every short form; a longer length-of-length beats a
-        // shorter one; and equal-width lengths compare big-endian == numerically.
-        var tmp: [8]u8 = undefined; // 254^8 digits exceeds any physical input
-        var n = sig_n;
-        var k: usize = 0;
-        while (n > 0) : (k += 1) {
-            tmp[k] = @intCast(n % NUM_RADIX);
-            n /= NUM_RADIX;
-        }
-        try l1.append(alloc, NUM_ESCALATE);
-        try l1.append(alloc, WEIGHT_BASE + @as(u8, @intCast(k)));
-        while (k > 0) {
-            k -= 1;
-            try l1.append(alloc, WEIGHT_BASE + tmp[k]);
-        }
-    }
-    var emit: usize = 0;
-    while (emit < sig.len) {
-        const d = digitAt(sig, emit) orelse break;
-        try l1.append(alloc, WEIGHT_BASE + d.v);
-        emit += d.len;
-    }
+    try pushNumLength(l1, alloc, countSigDigits(run), false);
+    try emitSigDigits(l1, alloc, run, false);
 }
 
 /// Append the primary bytes for an OTHER (unknown) code point: a class byte
@@ -2126,6 +2086,18 @@ test "signed/decimal: unsigned integers are BYTE-IDENTICAL to before" {
         if (s[0] >= '0' and s[0] <= '9') {
             try testing.expectEqual(@as(u8, CLASS_DIGIT), key[0]);
         }
+    }
+}
+
+test "numeric: default and decimal modes share the integer primary payload" {
+    for ([_][]const u8{ "0", "007", "123", "１２３", "𝟙𝟚𝟛" }) |s| {
+        const plain = try sortKeyAlloc(testing.allocator, 0, s);
+        defer testing.allocator.free(plain);
+        const decimal = try sortKeyAlloc(testing.allocator, OPT_DECIMAL, s);
+        defer testing.allocator.free(decimal);
+        const plain_end = std.mem.indexOfScalar(u8, plain, SEP).?;
+        const decimal_end = std.mem.indexOfScalar(u8, decimal, SEP).?;
+        try testing.expectEqualSlices(u8, plain[0..plain_end], decimal[0..decimal_end]);
     }
 }
 
