@@ -338,6 +338,33 @@ fn compatExpand(cp: u21) ?[]const u8 {
     };
 }
 
+test "finite fold and compatibility tables match the independent Unicode oracle" {
+    const oracle = @import("collation_oracle.zig");
+
+    for (oracle.folds) |expected| {
+        const actual = foldLetter(expected.cp) orelse return error.MissingFold;
+        try std.testing.expectEqual(expected.base, actual.base);
+        try std.testing.expectEqual(expected.dia, actual.dia);
+        try std.testing.expectEqual(expected.upper, actual.upper);
+    }
+    for (oracle.expansions) |expected| {
+        const actual = compatExpand(expected.cp) orelse return error.MissingExpansion;
+        try std.testing.expectEqualStrings(expected.replacement, actual);
+    }
+
+    // Count the complete Unicode domain so a new untested row cannot enter
+    // either switch and a removed row cannot hide behind unchanged samples.
+    var fold_count: usize = 0;
+    var expansion_count: usize = 0;
+    for (0..0x110000) |raw| {
+        const cp: u21 = @intCast(raw);
+        if (foldLetter(cp) != null) fold_count += 1;
+        if (compatExpand(cp) != null) expansion_count += 1;
+    }
+    try std.testing.expectEqual(oracle.folds.len + 52, fold_count); // ASCII A-Z + a-z
+    try std.testing.expectEqual(oracle.expansions.len, expansion_count);
+}
+
 const ROMAN_TOKENS = [_]struct { v: u16, t: []const u8 }{
     .{ .v = 1000, .t = "M" }, .{ .v = 900, .t = "CM" },
     .{ .v = 500, .t = "D" },  .{ .v = 400, .t = "CD" },

@@ -1,0 +1,142 @@
+#!/usr/bin/env luajit
+
+-- Generate exhaustive test expectations from Unicode 17.0.0 UnicodeData.txt.
+-- The implementation source supplies only the finite code-point scope; Unicode
+-- decomposition data plus the documented house exceptions supply the answers.
+
+local unicode_path = assert(arg[1], "usage: gen_collation_oracle UNICODE_DATA COLLATION_ZIG OUTPUT")
+local source_path = assert(arg[2], "usage: gen_collation_oracle UNICODE_DATA COLLATION_ZIG OUTPUT")
+local output_path = assert(arg[3], "usage: gen_collation_oracle UNICODE_DATA COLLATION_ZIG OUTPUT")
+local expected_hash = "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c"
+
+local function shell_quote(s)
+	return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local hash_pipe = assert(io.popen("sha256sum -- " .. shell_quote(unicode_path), "r"))
+local hash_line = assert(hash_pipe:read("*l"), "sha256sum produced no output")
+assert(hash_pipe:close(), "sha256sum failed")
+assert(hash_line:match("^([0-9a-f]+)") == expected_hash, "unexpected UnicodeData.txt SHA-256")
+
+local function fields(line)
+	local result = {}
+	for value in (line .. ";"):gmatch("(.-);") do result[#result + 1] = value end
+	return result
+end
+
+local unicode = {}
+for line in assert(io.lines(unicode_path)) do
+	local row = fields(line)
+	unicode[tonumber(row[1], 16)] = { category = row[3], decomposition = row[6] }
+end
+
+local fold_scope = {}
+local compat_scope = {}
+local section
+for line in assert(io.lines(source_path)) do
+	if line:match("^fn foldLetter") then section = "fold" end
+	if line:match("^fn compatExpand") then section = "compat" end
+	if section then
+		local cp = line:match("^%s*0x([0-9A-Fa-f]+)%s*=>")
+		if cp then
+			local target = section == "fold" and fold_scope or compat_scope
+			target[#target + 1] = tonumber(cp, 16)
+		end
+		if line:match("^%s*else%s*=>%s*null") then section = nil end
+	end
+end
+table.sort(fold_scope)
+table.sort(compat_scope)
+
+local mark_rank = {
+	[0x0300] = 1,  -- grave
+	[0x0301] = 2,  -- acute
+	[0x0302] = 3,  -- circumflex
+	[0x0303] = 4,  -- tilde
+	[0x0304] = 9,  -- macron
+	[0x0306] = 12, -- breve
+	[0x0307] = 10, -- dot above
+	[0x0308] = 5,  -- diaeresis
+	[0x030A] = 6,  -- ring above
+	[0x030C] = 8,  -- caron
+	[0x0326] = 13, -- comma below
+	[0x0327] = 7,  -- cedilla
+	[0x00B7] = 14, -- Catalan middle dot
+}
+
+local fold_override = {
+	[0x00D8] = { "o", 11 }, [0x00F8] = { "o", 11 },
+	[0x0110] = { "d", 11 }, [0x0111] = { "d", 11 },
+	[0x0141] = { "l", 11 }, [0x0142] = { "l", 11 },
+	-- Romanian legacy cedilla spellings intentionally share comma-below rank.
+	[0x015E] = { "s", 13 }, [0x015F] = { "s", 13 },
+	[0x0162] = { "t", 13 }, [0x0163] = { "t", 13 },
+}
+
+local compat_override = {
+	[0x00C6] = "AE", [0x00E6] = "ae",
+	[0x0152] = "OE", [0x0153] = "oe",
+	[0x00DF] = "ss", [0x1E9E] = "SS",
+	[0x0132] = "IJ", [0x0133] = "ij",
+	[0x2180] = "M",
+}
+
+local function decomposition_points(cp)
+	local raw = assert(unicode[cp], string.format("U+%04X absent from UnicodeData", cp)).decomposition
+	local points = {}
+	for token in raw:gmatch("%S+") do
+		if not token:match("^<") then points[#points + 1] = tonumber(token, 16) end
+	end
+	return points
+end
+
+local fold = {}
+for _, cp in ipairs(fold_scope) do
+	local row = assert(unicode[cp])
+	local base, rank
+	if fold_override[cp] then
+		base, rank = fold_override[cp][1], fold_override[cp][2]
+	else
+		local points = decomposition_points(cp)
+		assert(#points == 2, string.format("U+%04X needs a fold override", cp))
+		base = string.char(points[1]):lower()
+		rank = assert(mark_rank[points[2]], string.format("U+%04X has an unsupported mark", cp))
+	end
+	fold[#fold + 1] = { cp = cp, base = base, rank = rank, upper = row.category == "Lu" }
+end
+
+local compat = {}
+for _, cp in ipairs(compat_scope) do
+	local replacement = compat_override[cp]
+	if not replacement then
+		local chars = {}
+		for _, point in ipairs(decomposition_points(cp)) do
+			if point == 0x2044 then point = 0x002F end -- house style uses ASCII slash
+			assert(point < 0x80, string.format("U+%04X decomposition is not ASCII", cp))
+			chars[#chars + 1] = string.char(point)
+		end
+		replacement = table.concat(chars)
+	end
+	compat[#compat + 1] = { cp = cp, replacement = replacement }
+end
+
+local out = assert(io.open(output_path, "w"))
+out:write("//! Generated independent test oracle. DO NOT EDIT.\n")
+out:write("//! Source: Unicode 17.0.0 UnicodeData.txt, SHA-256 ", expected_hash, "\n")
+out:write("//! Scope comes from the finite implementation switches; answers come from Unicode data\n")
+out:write("//! plus documented house overrides for stroke letters, Romanian legacy forms, ligatures,\n")
+out:write("//! ASCII fraction slash, and U+2180.\n\n")
+out:write("pub const Fold = struct { cp: u21, base: u8, dia: u8, upper: bool };\n")
+out:write("pub const Expansion = struct { cp: u21, replacement: []const u8 };\n\n")
+out:write("pub const folds = [_]Fold{\n")
+for _, item in ipairs(fold) do
+	out:write(string.format("    .{ .cp = 0x%X, .base = '%s', .dia = %d, .upper = %s },\n",
+		item.cp, item.base, item.rank, tostring(item.upper)))
+end
+out:write("};\n\n")
+out:write("pub const expansions = [_]Expansion{\n")
+for _, item in ipairs(compat) do
+	out:write(string.format("    .{ .cp = 0x%X, .replacement = %q },\n", item.cp, item.replacement))
+end
+out:write("};\n")
+assert(out:close())

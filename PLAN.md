@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-policy unit + 265 CLI integration).
+Current test count: 369 passed, 0 failed (95 Zig unit + 3 C unit + 6 benchmark-policy unit + 265 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -237,7 +237,8 @@ Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-p
       code-point sort keys now include the public API's terminal NUL. Removed the
       unreachable byte-oriented signed-number implementation, corrected stale
       numeric documentation, and added unit, FFI, and CLI regressions. Full suite:
-      247 passed, 0 failed. Report: `CODE_REVIEW.md`. (2026-08-05 13:01 EDT)
+      247 passed, 0 failed. The completed report was later moved to Trash after
+      every finding was resolved. (2026-08-05 13:01 EDT)
 
 ## Open follow-ups
 
@@ -275,10 +276,12 @@ Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-p
       four warning, and two advisory items; the confirmed critical defects and
       related documentation/test/dead-code issues are complete above. (2026-08-05
       13:01 EDT)
-- [ ] **Decide the remaining review findings.** `CODE_REVIEW.md` leaves three
+- [x] **Decide the remaining review findings.** The August 5 review left three
       changes with product/API tradeoffs: Unicode-symbol boundaries for `--roman`,
       a reported allocation-failure path in the C comparison API, and a
-      same-machine baseline threshold in `./bm`.
+      same-machine baseline threshold in `./bm`. All are resolved below; the
+      absorbed review file is recoverable at
+      `~/.Trash/CODE_REVIEW-complete-20260813T1636EDT.md`.
       - [x] Explain and decide what ends an ASCII Roman-numeral token before
             changing `--roman`. *Poke: Unicode has boundary algorithms and
             properties, not a single “boundary punctuation” code point; combining
@@ -328,7 +331,7 @@ Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-p
       `scanExponent` (`1e５`), `--roman` Unicode boundaries, FFI OOM → 0,
       CLI treating key length 0 as success, CI skipping integration tests,
       silent write errors, `RCOL_DECIMAL_COMMA` header lie. (2026-08-13 12:20 EDT)
-- [ ] **Resolve verified Grok review findings in small green commits.** Preserve
+- [x] **Resolve verified Grok review findings in small green commits.** Preserve
       the independent review artifact separately from implementation changes.
       - [x] Baseline `./test`, verify the review-artifact diff, and commit
             `GROK_FEEDBACK.md` + its plan/dirtree metadata. *Poke: a green Zig-only
@@ -369,10 +372,16 @@ Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-p
             code-point-key shape in the fuzzer. *Poke: identical numeric payloads
             must include folded styles and zero.* Full 200,000-iteration fuzz
             run passed 1,724,460 property checks. (2026-08-13 12:45 EDT)
-      - [ ] Add a semantically valid folded-digit fuzz shape and independent,
+      - [x] Add a semantically valid folded-digit fuzz shape and independent,
             exhaustive expectations for the finite compatibility/letter tables.
             *Poke: expectations generated from the implementation table are
-            exhaustive but not independent; derive them from Unicode data.*
+            exhaustive but not independent; derive them from Unicode data.* The
+            oracle derives answers from pinned Unicode 17.0.0 `UnicodeData.txt`
+            plus documented house overrides, then sweeps the complete code-point
+            domain. The fuzzer independently decodes valid ASCII, fullwidth, and
+            all five mathematical digit styles. Rank, `℅`, and fullwidth-digit
+            mutations all failed; the restored 200,000-iteration run passed
+            1,737,615 checks. (2026-08-13 16:43 EDT)
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and

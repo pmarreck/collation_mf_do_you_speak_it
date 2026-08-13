@@ -27,10 +27,10 @@
 //!   HYGIENE
 //!     keys NUL-terminated, no interior NUL   (RULES.md #4)
 //!
-//! Inputs come in three shapes — structured, raw bytes (invalid UTF-8), and
-//! digits-only. The third exists because the numeric oracle only fires on pure
-//! digit strings, which random generation essentially never produces; without
-//! it that oracle sat idle and a broken length prefix went undetected.
+//! Inputs come in four shapes — structured, raw bytes (invalid UTF-8), ASCII
+//! digits, and well-formed folded digits. The two numeric shapes exist because
+//! the numeric oracle only fires on pure digit strings, which random byte
+//! generation essentially never produces.
 
 const std = @import("std");
 const collation = @import("collation.zig");
@@ -145,16 +145,47 @@ fn checkLevelAlignment(alloc: std.mem.Allocator, opts: u32, s: []const u8) !void
     if (lv.l2.len != lv.l3.len) return error.LevelDesync;
 }
 
-/// SEMANTIC, with an oracle the key builder did not write: for a pure ASCII
-/// digit string, collation order must equal numeric order, which is
-/// (significant-digit count, then lexicographic) computed here independently.
+const ORACLE_DIGIT_BASES = [_]u21{
+    '0', 0xFF10, 0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
+};
+
+fn oracleDigitAt(s: []const u8, start: usize) ?struct { value: u8, len: usize } {
+    const lead = s[start];
+    const len = std.unicode.utf8ByteSequenceLength(lead) catch return null;
+    if (start + len > s.len) return null;
+    const cp = std.unicode.utf8Decode(s[start .. start + len]) catch return null;
+    for (ORACLE_DIGIT_BASES) |base| {
+        if (cp >= base and cp < base + 10) return .{ .value = @intCast(cp - base), .len = len };
+    }
+    return null;
+}
+
+fn oracleDigits(s: []const u8, out: []u8) ?[]const u8 {
+    var source: usize = 0;
+    var count: usize = 0;
+    while (source < s.len) {
+        const digit = oracleDigitAt(s, source) orelse return null;
+        if (count == out.len) return null;
+        out[count] = digit.value;
+        count += 1;
+        source += digit.len;
+    }
+    return if (count == 0) null else out[0..count];
+}
+
+/// SEMANTIC, with an independently decoded oracle: pure ASCII/fullwidth/math
+/// digit strings must order by significant-digit count and then digit values.
 fn checkNumericOracle(alloc: std.mem.Allocator, a: []const u8, b: []const u8) !void {
+    var a_digits_buf: [96]u8 = undefined;
+    var b_digits_buf: [96]u8 = undefined;
+    const a_digits = oracleDigits(a, &a_digits_buf) orelse return error.NotOracleDigits;
+    const b_digits = oracleDigits(b, &b_digits_buf) orelse return error.NotOracleDigits;
     var ai: usize = 0;
     var bi: usize = 0;
-    while (ai < a.len and a[ai] == '0') ai += 1;
-    while (bi < b.len and b[bi] == '0') bi += 1;
-    const sa = a[ai..];
-    const sb = b[bi..];
+    while (ai < a_digits.len and a_digits[ai] == 0) ai += 1;
+    while (bi < b_digits.len and b_digits[bi] == 0) bi += 1;
+    const sa = a_digits[ai..];
+    const sb = b_digits[bi..];
     const want: i32 = if (sa.len != sb.len)
         (if (sa.len < sb.len) @as(i32, -1) else 1)
     else switch (std.mem.order(u8, sa, sb)) {
@@ -202,13 +233,25 @@ fn checkExpansions(alloc: std.mem.Allocator) !void {
     }
 }
 
-/// Three generation modes, because the semantic oracles only fire on inputs of a
+/// Four generation modes, because the semantic oracles only fire on inputs of a
 /// particular SHAPE. Left to chance, a pure-digit string essentially never
 /// appears, so the numeric oracle sat idle and a broken length prefix went
 /// undetected — mutation testing found exactly that.
-const Shape = enum { interesting, raw_bytes, digits_only };
+const Shape = enum { interesting, raw_bytes, digits_only, folded_digits };
+
+fn genFoldedDigits(rng: std.Random, buf: []u8) []u8 {
+    const digit_count = rng.intRangeAtMost(usize, 0, buf.len / 4);
+    var end: usize = 0;
+    for (0..digit_count) |_| {
+        const base = ORACLE_DIGIT_BASES[rng.uintLessThan(usize, ORACLE_DIGIT_BASES.len)];
+        const cp: u21 = base + rng.uintLessThan(u8, 10);
+        end += std.unicode.utf8Encode(cp, buf[end..]) catch unreachable;
+    }
+    return buf[0..end];
+}
 
 fn genString(rng: std.Random, buf: []u8, shape: Shape) []u8 {
+    if (shape == .folded_digits) return genFoldedDigits(rng, buf);
     const n = rng.intRangeAtMost(usize, 0, buf.len);
     switch (shape) {
         .interesting => for (0..n) |i| {
@@ -218,15 +261,17 @@ fn genString(rng: std.Random, buf: []u8, shape: Shape) []u8 {
         .digits_only => for (0..n) |i| {
             buf[i] = '0' + rng.uintLessThan(u8, 10);
         },
+        .folded_digits => unreachable,
     }
     return buf[0..n];
 }
 
 fn pickShape(rng: std.Random) Shape {
-    return switch (rng.uintLessThan(u8, 3)) {
+    return switch (rng.uintLessThan(u8, 4)) {
         0 => .interesting,
         1 => .raw_bytes,
-        else => .digits_only,
+        2 => .digits_only,
+        else => .folded_digits,
     };
 }
 
@@ -303,21 +348,9 @@ pub fn main() !void {
         // Semantic properties, checked against oracles the key builder did not
         // write. Digit-only strings drive the numeric oracle; ASCII strings
         // drive the case-fold invariant.
-        var all_digits = a.len > 0;
-        for (a) |ch| {
-            if (ch < '0' or ch > '9') {
-                all_digits = false;
-                break;
-            }
-        }
-        var b_digits = b.len > 0;
-        for (b) |ch| {
-            if (ch < '0' or ch > '9') {
-                b_digits = false;
-                break;
-            }
-        }
-        if (all_digits and b_digits) {
+        var a_digit_buf: [96]u8 = undefined;
+        var b_digit_buf: [96]u8 = undefined;
+        if (oracleDigits(a, &a_digit_buf) != null and oracleDigits(b, &b_digit_buf) != null) {
             checkNumericOracle(alloc, a, b) catch |e| {
                 std.debug.print("\nFAIL {s}\n  a={s}\n  b={s}\n  seed=0x{X} iter={d}\n", .{ @errorName(e), hex(&hex_a, a), hex(&hex_b, b), seed, i });
                 std.process.exit(1);
