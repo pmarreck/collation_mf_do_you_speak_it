@@ -279,6 +279,37 @@ Current test count: 335 passed, 0 failed (86 Zig unit + 249 CLI integration).
       changes with product/API tradeoffs: Unicode-symbol boundaries for `--roman`,
       a reported allocation-failure path in the C comparison API, and a
       same-machine baseline threshold in `./bm`.
+- [x] **Independent Grok codebase review.** Full 13-dimension audit at
+      `5f4ca05` written to `GROK_FEEDBACK.md`. August 5 criticals re-verified
+      fixed. New warnings: `--version-sort` after `-n`/`-s`, ASCII-only
+      `scanExponent` (`1e５`), `--roman` Unicode boundaries, FFI OOM → 0,
+      CLI treating key length 0 as success, CI skipping integration tests,
+      silent write errors, `RCOL_DECIMAL_COMMA` header lie. (2026-08-13 12:20 EDT)
+- [ ] **Resolve verified Grok review findings in small green commits.** Preserve
+      the independent review artifact separately from implementation changes.
+      - [ ] Baseline `./test`, verify the review-artifact diff, and commit
+            `GROK_FEEDBACK.md` + its plan/dirtree metadata. *Poke: a green Zig-only
+            check is insufficient; the baseline must include every CLI suite.*
+      - [ ] Make later `--version-sort` clear every decimal/scientific mode.
+            *Poke: cover both short and long forms that can leave bits behind.*
+      - [ ] Fold fullwidth and mathematical digits in scientific exponents.
+            *Poke: cover upper/lower exponent markers, exponent signs, negative
+            values, and invalid suffix boundaries.*
+      - [ ] Reject impossible zero-length FFI sort keys in the CLI through a
+            mechanically falsifiable seam. *Poke: empty input and an empty line
+            still produce a valid nonzero-length key.*
+      - [ ] Make `checks.test` run the same Zig + CLI contract as `./test`, with
+            every required Nix dependency. *Poke: avoid recursive `nix build`
+            when `./test` runs inside a Nix derivation.*
+      - [ ] Fail loudly on stdout write/flush errors. *Poke: SIGPIPE and `/dev/full`
+            may fail through different stdio paths and must never exit 0.*
+      - [ ] Correct stale public/internal prose and remove proven dead state.
+            *Poke: keep scientific comma semantics and the eight prepare-phase
+            locale names exact.*
+      - [ ] Strengthen the independent controls called out in the advisories:
+            folded-digit fuzz shapes, finite-table coverage, FFI truncation
+            contracts, and duplicated numeric encoding. *Poke: tests generated
+            from the implementation table are exhaustive but not independent.*
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and

@@ -4,6 +4,7 @@ annotate=[
 	.mechatron-prime = Mechatron Prime CI config (Garnix is retired)
 	.mechatron-prime/targets = Exact flake attrs the Thelio worker builds per signed push: packages.default + checks.build/test
 	CODE_REVIEW.md = Independent 13-dimension audit with implementation status and remaining design decisions
+	GROK_FEEDBACK.md = Independent 13-dimension Grok review at 5f4ca05; suggested improvements, not a rehash of the Aug 5 criticals
 	LICENSE = MIT
 	PLAN.md = Work plan: completed core/i18n work, active Latin-order and review decisions, deferred future scope.
 	PROJECT_OVERVIEW.md = Ultimate goals, rationale (glibc/musl/ICU), architecture diagram, terminology (sort key, house style, collation element, levels)
