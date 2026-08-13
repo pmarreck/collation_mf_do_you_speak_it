@@ -50,4 +50,6 @@ annotate=[
 	tests/integration/latin_coverage.sh = Latin coverage as a classifier over sets: sensitivity (whole declared per-language char set must be letter-class) + specificity corpus (out-of-scope must stay CLASS_OTHER); ligature/Romanian/Catalan orderings
 	tests/integration/numeric_sort.sh = Numeric collation end-to-end: natural runs, arbitrary precision past the old 250-digit cap, bc differential oracle (independent arbitrary-precision) + sort -n corroboration, signed offset-0 rule, versions vs --decimal, and a sort -g precision negative control
 	tests/integration/readme_translations.sh = Checks reciprocal language-selector links across translated READMEs.
+	tests/unit = C-level unit tests for CLI adapter error paths
+	tests/unit/cli_key_failure.c = C adapter unit test: injects zero-length sort-key failure and pins valid empty-line keys
 ]

@@ -49,6 +49,10 @@ echo "Building (ReleaseFast)..."
 # which run_suite's grep can pick up.
 run_suite "Zig Unit Tests" "nix develop -c zig build test --summary all 2>&1"
 
+# C adapter tests inject FFI failures that the successful Zig implementation
+# cannot produce on demand.
+run_suite "C CLI Adapter Unit Tests" "nix develop -c zig build c-test --summary all 2>&1"
+
 # Integration tests (CLI surface) — add as they're written
 for t in "$SCRIPT_DIR"/tests/integration/*.sh; do
 	[[ -f "$t" ]] || continue

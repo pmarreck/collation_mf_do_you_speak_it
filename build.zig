@@ -77,6 +77,27 @@ pub fn build(b: *std.Build) void {
     }));
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
 
+    // C-side unit tests exercise CLI adapter failures that the successful Zig
+    // FFI cannot produce on demand. The test includes cli/main.c so it reaches
+    // static adapter seams while the production executable remains unchanged.
+    const c_test_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    c_test_mod.addCSourceFile(.{
+        .file = b.path("tests/unit/cli_key_failure.c"),
+        .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-Wpedantic" },
+    });
+    c_test_mod.addIncludePath(b.path("include"));
+    c_test_mod.linkLibrary(lib);
+    const c_tests = b.addExecutable(.{
+        .name = "cli-key-failure-test",
+        .root_module = c_test_mod,
+    });
+    const run_c_tests = b.addRunArtifact(c_tests);
+    b.step("c-test", "Run C CLI adapter unit tests").dependOn(&run_c_tests.step);
+
     // ─── Property fuzzer ─────────────────────────────────────────────────
     // Checks the ORDERING laws (key-order == compare-order, reflexivity,
     // antisymmetry, transitivity, C-safe keys) rather than merely "does it

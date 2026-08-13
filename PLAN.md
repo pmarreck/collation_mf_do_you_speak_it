@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 346 passed, 0 failed (87 Zig unit + 259 CLI integration).
+Current test count: 348 passed, 0 failed (87 Zig unit + 2 C unit + 259 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -300,9 +300,11 @@ Current test count: 346 passed, 0 failed (87 Zig unit + 259 CLI integration).
             values, and invalid suffix boundaries.* `scanExponent` now advances
             through `digitAt`; a unit set sweeps all six digit styles and five
             CLI regressions cover signed/end-to-end behavior. (2026-08-13 12:28 EDT)
-      - [ ] Reject impossible zero-length FFI sort keys in the CLI through a
+      - [x] Reject impossible zero-length FFI sort keys in the CLI through a
             mechanically falsifiable seam. *Poke: empty input and an empty line
-            still produce a valid nonzero-length key.*
+            still produce a valid nonzero-length key.* An injected C adapter
+            test proves both the failure sentinel and valid empty-line path;
+            `./test` runs it on every full-suite pass. (2026-08-13 12:32 EDT)
       - [ ] Make `checks.test` run the same Zig + CLI contract as `./test`, with
             every required Nix dependency. *Poke: avoid recursive `nix build`
             when `./test` runs inside a Nix derivation.*

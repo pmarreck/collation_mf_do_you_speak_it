@@ -647,6 +647,54 @@ typedef struct {
     size_t key_len;
 } row_t;
 
+typedef size_t (*sort_key_fn)(const rcol_collator *, const uint8_t *, size_t,
+                              uint8_t *, size_t);
+
+typedef enum {
+    SORT_KEY_OK = 0,
+    SORT_KEY_ALLOC_FAILED,
+    SORT_KEY_BUILD_FAILED,
+} sort_key_status;
+
+/* Build one owned key and reject the FFI's zero-length failure sentinel. The
+ * injected function keeps this adapter error path mechanically testable. */
+static sort_key_status build_sort_key(sort_key_fn get_sort_key,
+                                      const rcol_collator *coll,
+                                      const uint8_t *src, size_t src_len,
+                                      uint8_t **out_key, size_t *out_len) {
+    *out_key = NULL;
+    *out_len = 0;
+    if (src_len > (SIZE_MAX - 16) / 6) return SORT_KEY_ALLOC_FAILED;
+
+    size_t cap = src_len * 6 + 16;
+    uint8_t *key = (uint8_t *)malloc(cap);
+    if (!key) return SORT_KEY_ALLOC_FAILED;
+
+    size_t need = get_sort_key(coll, src, src_len, key, cap);
+    if (need == 0) {
+        free(key);
+        return SORT_KEY_BUILD_FAILED;
+    }
+    if (need > cap) {
+        uint8_t *grown = (uint8_t *)realloc(key, need);
+        if (!grown) {
+            free(key);
+            return SORT_KEY_ALLOC_FAILED;
+        }
+        key = grown;
+        cap = need;
+        need = get_sort_key(coll, src, src_len, key, cap);
+        if (need == 0 || need > cap) {
+            free(key);
+            return SORT_KEY_BUILD_FAILED;
+        }
+    }
+
+    *out_key = key;
+    *out_len = need;
+    return SORT_KEY_OK;
+}
+
 static const rcol_collator *g_coll; /* used by qsort comparator */
 
 /* Order by sort-key memcmp; break ties by raw line bytes for determinism. */
@@ -765,25 +813,14 @@ static int cmd_sort(const char *path, uint32_t options,
             const uint8_t *ksrc;
             size_t ksrc_len;
             extract_field(line, line_len, sep, sep_len, key_field, &ksrc, &ksrc_len);
-            /* Safe upper bound on key length: 6 bytes/input byte + structural. */
-            size_t cap = ksrc_len * 6 + 16;
-            uint8_t *key = (uint8_t *)malloc(cap);
-            if (!key) {
+            uint8_t *key;
+            size_t need;
+            sort_key_status key_status = build_sort_key(
+                rcol_get_sort_key, coll, ksrc, ksrc_len, &key, &need);
+            if (key_status != SORT_KEY_OK) {
                 exit_code = 1;
                 fputs("collate: out of memory\n", stderr);
                 break;
-            }
-            size_t need = rcol_get_sort_key(coll, ksrc, ksrc_len, key, cap);
-            if (need > cap) {
-                uint8_t *nk = (uint8_t *)realloc(key, need);
-                if (!nk) {
-                    free(key);
-                    exit_code = 1;
-                    fputs("collate: out of memory\n", stderr);
-                    break;
-                }
-                key = nk;
-                need = rcol_get_sort_key(coll, ksrc, ksrc_len, key, need);
             }
             rows[idx].line = line;
             rows[idx].line_len = line_len;
