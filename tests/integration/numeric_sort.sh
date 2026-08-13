@@ -190,6 +190,11 @@ assert_order "mixed notation list"            -s -- 1234 2e5 1e10
 assert_order "zero placement"                 -s -- -5 -1e-999 0 1e-999 5
 assert_order "negatives invert wholly"        -s -- -1e10 -2e5 -1e3 -9e2
 assert_order "bare 'e' is not an exponent"    -s -- 3employees 4employees
+assert_order "fullwidth exponent"             -s -- 2e4 1e５
+assert_order "capital E, fullwidth exponent"  -s -- 2E４ 1E5
+assert_order "negative value, folded exponent" -s -- -1e５ -2e4
+assert_order "negative folded exponent"       -s -- 1e-５ 1e-4
+assert_order "mathematical exponent"          -s -- 2e𝟒 1e5
 
 echo "── --numeric = scientific + grouping ──"
 assert_order "-n does both"                   -n -- 1,234 2e5 999,999 1,000,000

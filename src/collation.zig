@@ -811,13 +811,17 @@ fn scanExponent(s: []const u8, i: usize) ?struct { exp: i64, end: usize } {
         neg = s[j] == '-';
         j += 1;
     }
-    if (j >= s.len or s[j] < '0' or s[j] > '9') return null;
     var v: i64 = 0;
-    while (j < s.len and s[j] >= '0' and s[j] <= '9') : (j += 1) {
+    var saw_digit = false;
+    while (j < s.len) {
+        const d = digitAt(s, j) orelse break;
+        saw_digit = true;
         // Saturate rather than overflow; an exponent this large is already
         // beyond any representable magnitude and ordering is preserved.
-        if (v < 1_000_000_000) v = v * 10 + @as(i64, s[j] - '0');
+        if (v < 1_000_000_000) v = v * 10 + d.v;
+        j += d.len;
     }
+    if (!saw_digit) return null;
     return .{ .exp = if (neg) -v else v, .end = j };
 }
 
@@ -1873,6 +1877,18 @@ test "scientific: compares by VALUE, exponent first" {
     try expectOrder(s, "5e-1", "5e0");
     try expectOrder(s, "1E10", "2E10"); // capital E too
     try expectOrder(s, "1e+5", "1e+10"); // explicit + in the exponent
+}
+
+test "scientific: folded digits in exponents compare by value" {
+    const s = OPT_SCIENTIFIC;
+    // Sweep every digit style accepted by digitAt. Each spelling is 1e5,
+    // which must outrank 2e4 regardless of its UTF-8 byte width.
+    for ([_][]const u8{ "1e５", "1e𝟓", "1e𝟝", "1e𝟧", "1e𝟱", "1e𝟻" }) |folded| {
+        try expectOrder(s, "2e4", folded);
+    }
+    try expectOrder(s, "2E４", "1E5");
+    try expectOrder(s, "-1e５", "-2e4");
+    try expectOrder(s, "1e-５", "1e-4");
 }
 
 test "scientific: normalizes plain numbers too, so mixed lists work" {

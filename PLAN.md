@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 340 passed, 0 failed (86 Zig unit + 254 CLI integration).
+Current test count: 346 passed, 0 failed (87 Zig unit + 259 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -295,9 +295,11 @@ Current test count: 340 passed, 0 failed (86 Zig unit + 254 CLI integration).
             *Poke: cover both short and long forms that can leave bits behind.*
             Five red-to-green CLI regressions cover `-n`, `--numeric`, `-s`,
             `--scientific`, and stale comma-mode state. (2026-08-13 12:25 EDT)
-      - [ ] Fold fullwidth and mathematical digits in scientific exponents.
+      - [x] Fold fullwidth and mathematical digits in scientific exponents.
             *Poke: cover upper/lower exponent markers, exponent signs, negative
-            values, and invalid suffix boundaries.*
+            values, and invalid suffix boundaries.* `scanExponent` now advances
+            through `digitAt`; a unit set sweeps all six digit styles and five
+            CLI regressions cover signed/end-to-end behavior. (2026-08-13 12:28 EDT)
       - [ ] Reject impossible zero-length FFI sort keys in the CLI through a
             mechanically falsifiable seam. *Poke: empty input and an empty line
             still produce a valid nonzero-length key.*
