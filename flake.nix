@@ -14,7 +14,11 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, zig-overlay }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachSystem [
+      "aarch64-darwin"
+      "aarch64-linux"
+      "x86_64-linux"
+    ] (system:
       let
         pkgs = import nixpkgs { inherit system; };
         pname = "romantic_collation";
@@ -46,13 +50,19 @@
             pname = "${pname}-test";
             inherit version;
             src = ./.;
-            nativeBuildInputs = [ zigPkg ];
+            nativeBuildInputs = [
+              zigPkg
+              pkgs.bash
+              pkgs.bc
+              pkgs.coreutils
+              pkgs.ripgrep
+            ];
             dontConfigure = true;
             dontFixup = true;
             buildPhase = ''
               export HOME=$TMPDIR
               ${pkgs.lib.optionalString pkgs.stdenv.isDarwin "unset NIX_CFLAGS_COMPILE NIX_LDFLAGS"}
-              timeout 600 zig build test || { echo "Tests failed"; exit 1; }
+              timeout 600 ${pkgs.bash}/bin/bash ./test || { echo "Tests failed"; exit 1; }
             '';
             installPhase = ''
               mkdir -p $out

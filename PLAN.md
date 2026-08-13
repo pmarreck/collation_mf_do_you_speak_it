@@ -305,9 +305,12 @@ Current test count: 348 passed, 0 failed (87 Zig unit + 2 C unit + 259 CLI integ
             still produce a valid nonzero-length key.* An injected C adapter
             test proves both the failure sentinel and valid empty-line path;
             `./test` runs it on every full-suite pass. (2026-08-13 12:32 EDT)
-      - [ ] Make `checks.test` run the same Zig + CLI contract as `./test`, with
+      - [x] Make `checks.test` run the same Zig + CLI contract as `./test`, with
             every required Nix dependency. *Poke: avoid recursive `nix build`
-            when `./test` runs inside a Nix derivation.*
+            when `./test` runs inside a Nix derivation.* The runner detects
+            `NIX_BUILD_TOP` and uses direct Zig commands; the exact x86_64-linux
+            check passes all 348 tests. Also removed unsupported x86_64-darwin
+            flake outputs found during target evaluation. (2026-08-13 12:37 EDT)
       - [ ] Fail loudly on stdout write/flush errors. *Poke: SIGPIPE and `/dev/full`
             may fail through different stdio paths and must never exit 0.*
       - [ ] Correct stale public/internal prose and remove proven dead state.
