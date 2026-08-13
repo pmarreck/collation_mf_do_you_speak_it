@@ -299,9 +299,13 @@ a declaration, like `--decimal`.
 
 Three rules narrow the damage:
 
-1. **Whole token only.** The maximal ASCII-letter run must parse in full, so
-   `MIXER` is never considered. A non-ASCII letter directly after the run (as in
-   `MIXé`) also disqualifies it.
+1. **Whole Unicode word only.** The maximal ASCII-letter run must parse in full
+   and have a Unicode word boundary on each side, the `\bIX\b` model. Boundaries
+   follow UAX #29 with Unicode 17.0.0 data compiled into the library. Thus em
+   dash and ™ delimit a numeral, while non-ASCII letters (`MIXé`), digits
+   (`IX2`), connector punctuation (`IX_`), and combining marks do not. UAX #29
+   also keeps contextual punctuation inside `IX.example`, as it does for
+   `example.com`.
 2. **Canonical spellings only**, validated by parse-then-re-render: greedily
    consume the largest token at each step, render the resulting number back, and
    require it to equal the input. That is the canonical grammar without writing
@@ -348,6 +352,11 @@ Bare single letters are deliberately still read as numerals, so a chapter list
 numbered `I, II, III` sorts correctly. The cost is that the pronoun `I` and a
 musical key like `C` become numbers under `--roman`; that is the documented
 trade, not an oversight.
+
+The library does not infer Roman-numeral context from the surrounding corpus.
+That would make one row's sort key change when an unrelated row is added.
+Without `--roman`, every ASCII Roman spelling remains ordinary text; with it,
+the explicit declaration and rules above apply independently to each string.
 
 Both narrowing rules are mutation-verified: dropping the re-render check makes
 `civil` a numeral, and dropping the uniform-case check makes `Di` one.

@@ -19,6 +19,7 @@
 //! ignored, unlike UCA) and length-prefixed numeric runs for natural sort.
 
 const std = @import("std");
+const word_break = @import("word_break_data.zig");
 
 // ─── Option bits (mirror the C header) ───────────────────────────────────
 pub const OPT_CODE_POINT: u32 = 1 << 0;
@@ -410,6 +411,84 @@ fn romanValue(s: []const u8) ?u16 {
     }
     if (!std.mem.eql(u8, render[0..n], t)) return null;
     return total;
+}
+
+const WordProperty = word_break.Property;
+const LocatedWordProperty = struct { property: WordProperty, start: usize };
+
+fn isWordIgnored(property: WordProperty) bool {
+    return property == .extend or property == .format or property == .zwj;
+}
+
+fn isAhLetter(property: WordProperty) bool {
+    return property == .a_letter or property == .hebrew_letter;
+}
+
+fn isMidLetter(property: WordProperty) bool {
+    return property == .mid_letter or property == .mid_num_let or property == .single_quote;
+}
+
+fn wordPropertyAt(s: []const u8, start: usize) struct { property: WordProperty, end: usize } {
+    const lead = s[start];
+    const len = std.unicode.utf8ByteSequenceLength(lead) catch return .{ .property = .other, .end = start + 1 };
+    if (start + len > s.len) return .{ .property = .other, .end = start + 1 };
+    const cp = std.unicode.utf8Decode(s[start .. start + len]) catch return .{ .property = .other, .end = start + 1 };
+    return .{ .property = word_break.property(cp), .end = start + len };
+}
+
+fn previousWordProperty(s: []const u8, end: usize) LocatedWordProperty {
+    var start = end - 1;
+    while (start > 0 and s[start] & 0xC0 == 0x80) start -= 1;
+    const decoded = wordPropertyAt(s, start);
+    if (decoded.end != end) return .{ .property = .other, .start = end - 1 };
+    return .{ .property = decoded.property, .start = start };
+}
+
+fn nextSignificantWordProperty(s: []const u8, start: usize) ?WordProperty {
+    var i = start;
+    while (i < s.len) {
+        const decoded = wordPropertyAt(s, i);
+        i = decoded.end;
+        if (!isWordIgnored(decoded.property)) return decoded.property;
+    }
+    return null;
+}
+
+fn previousSignificantWordProperty(s: []const u8, end: usize) ?LocatedWordProperty {
+    var i = end;
+    while (i > 0) {
+        const decoded = previousWordProperty(s, i);
+        i = decoded.start;
+        if (!isWordIgnored(decoded.property)) return decoded;
+    }
+    return null;
+}
+
+/// Apply the UAX #29 rules that can touch the start of an ASCII-letter run.
+fn romanWordBoundaryBefore(s: []const u8, start: usize) bool {
+    if (start == 0) return true;
+    var left = previousWordProperty(s, start);
+    if (isWordIgnored(left.property)) left = previousSignificantWordProperty(s, left.start) orelse return true;
+    if (isAhLetter(left.property) or left.property == .numeric or left.property == .extend_num_let) return false;
+    if (isMidLetter(left.property)) {
+        const before_mid = previousSignificantWordProperty(s, left.start) orelse return true;
+        if (isAhLetter(before_mid.property)) return false;
+    }
+    return true;
+}
+
+/// Apply the UAX #29 rules that can touch the end of an ASCII-letter run.
+fn romanWordBoundaryAfter(s: []const u8, end: usize) bool {
+    if (end == s.len) return true;
+    const right = wordPropertyAt(s, end);
+    // WB4 keeps Extend, Format, and ZWJ attached to the preceding character.
+    if (isWordIgnored(right.property)) return false;
+    if (isAhLetter(right.property) or right.property == .numeric or right.property == .extend_num_let) return false;
+    if (isMidLetter(right.property)) {
+        const after_mid = nextSignificantWordProperty(s, right.end) orelse return true;
+        if (isAhLetter(after_mid)) return false;
+    }
+    return true;
 }
 
 /// Emit a Roman numeral as a numeric element, so `IV` lands between 3 and 5.
@@ -1067,9 +1146,12 @@ pub fn sortKeyAlloc(alloc: std.mem.Allocator, options: u32, s: []const u8) ![]u8
         if (roman and ((b >= 'A' and b <= 'Z') or (b >= 'a' and b <= 'z'))) {
             var j = i;
             while (j < s.len and ((s[j] >= 'A' and s[j] <= 'Z') or (s[j] >= 'a' and s[j] <= 'z'))) j += 1;
-            // A non-ASCII letter immediately after (café, MIXé) means the run is
-            // not the whole token, so it cannot be a numeral.
-            const whole = j >= s.len or s[j] < 0x80;
+            // A Roman numeral must occupy a complete Unicode word segment.
+            // This is the `\bIX\b` intuition with pinned UAX #29 data: symbols
+            // and most punctuation delimit it, while letters, digits,
+            // connectors, combining marks, and contextual mid-word punctuation
+            // keep it inside the surrounding word.
+            const whole = romanWordBoundaryBefore(s, i) and romanWordBoundaryAfter(s, j);
             if (whole and romanValue(s[i..j]) != null) {
                 try pushRoman(&l1, &l2, &l3, alloc, romanValue(s[i..j]).?);
             } else {
@@ -1519,6 +1601,29 @@ test "roman: embedded numerals sort by value" {
     const r = OPT_ROMAN;
     try expectOrder(r, "Chapter VII", "Chapter IX");
     try expectOrder(r, "Part IV", "Part V");
+}
+
+test "roman: Unicode word boundaries delimit numeral tokens" {
+    const r = OPT_ROMAN;
+
+    // Punctuation and symbols provide boundaries on both sides.
+    try expectOrder(r, "VII—", "IX—");
+    try expectOrder(r, "VII™", "IX™");
+    try expectOrder(r, "—VII", "—IX");
+
+    // Letters, digits, connector punctuation, and combining marks continue the
+    // word. Text order is IX < VII, the opposite of numeral value order.
+    try expectOrder(r, "MIXé", "MIXf");
+    try expectOrder(r, "éIX", "éVII");
+    try expectOrder(r, "IX2", "VII2");
+    try expectOrder(r, "IX_", "VII_");
+    try expectOrder(r, "IX\u{0301}", "VII\u{0301}");
+
+    // UAX #29 keeps letters joined across certain mid-word punctuation when a
+    // letter follows it, as in example.com.
+    try expectOrder(r, "IX.example", "VII.example");
+    try expectOrder(r, "IX.\u{0301}example", "VII.\u{0301}example");
+    try expectOrder(r, "example.\u{0301}IX", "example.\u{0301}VII");
 }
 
 test "roman: ONLY canonical whole tokens count" {

@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 354 passed, 0 failed (91 Zig unit + 3 C unit + 260 CLI integration).
+Current test count: 360 passed, 0 failed (92 Zig unit + 3 C unit + 265 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -279,10 +279,16 @@ Current test count: 354 passed, 0 failed (91 Zig unit + 3 C unit + 260 CLI integ
       changes with product/API tradeoffs: Unicode-symbol boundaries for `--roman`,
       a reported allocation-failure path in the C comparison API, and a
       same-machine baseline threshold in `./bm`.
-      - [ ] Explain and decide what ends an ASCII Roman-numeral token before
+      - [x] Explain and decide what ends an ASCII Roman-numeral token before
             changing `--roman`. *Poke: Unicode has boundary algorithms and
             properties, not a single “boundary punctuation” code point; combining
             marks and unsupported scripts must not silently become separators.*
+            Decision: use pinned Unicode word-boundary semantics equivalent to
+            `\bIX\b`; keep detection explicitly opt-in through `--roman` and do
+            not infer meaning from the surrounding corpus. *Poke: adding an
+            unrelated input row must never change another row's sort key.*
+            Implemented with generated Unicode 17.0.0 Word_Break data and
+            two-sided UAX #29 rules. (Peter + Codex, 2026-08-13 16:14 EDT)
       - [ ] Replace ambiguous FFI failure sentinels with an explicit checked C
             ABI. Breaking the pre-release ABI is allowed when it yields the
             cleaner contract. *Poke: comparison equality, empty-string key
@@ -301,7 +307,9 @@ Current test count: 354 passed, 0 failed (91 Zig unit + 3 C unit + 260 CLI integ
       - [ ] Separate performance and complexity benchmark records and clarify
             whether an unexpectedly low scaling ratio should block or merely
             demand review. *Poke: fixed overhead can make small-N ratios look
-            artificially low.*
+            artificially low.* Decision: use separate `.performance.ndjson` and
+            `.complexity.ndjson` streams; gate each doubling in `[1.5, 3.0)`
+            after proving the smallest size is beyond startup-dominated behavior.
       - [x] Classify thin space U+2009 and narrow no-break space U+202F as
             structural whitespace, matching NBSP U+00A0. *Poke: assert the
             classifier over a set containing whitespace and lookalike

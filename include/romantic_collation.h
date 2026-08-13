@@ -83,8 +83,10 @@ extern "C" {
 
 /* Order whole-token Roman numerals by VALUE (VII < IX) rather than as text.
  * Opt-in because detection is irreducibly ambiguous: "MIX" is a real word AND a
- * canonical numeral for 1009. Only CANONICAL spellings of a COMPLETE token in
- * uniform case qualify, which rejects "CIVIL", "DID", "IIII" and "Mix".
+ * canonical numeral for 1009. COMPLETE means bounded as a Unicode word under
+ * pinned UAX #29 / Unicode 17.0.0 data, the `\bIX\b` model. Only CANONICAL
+ * spellings in uniform case qualify, which rejects "CIVIL", "DID", "IIII",
+ * "Mix", "MIXé", "IX2", and "IX_".
  * A recognized numeral becomes a numeric element, so IV sorts between 3 and 5
  * and therefore below every letter, per the structural-first rule. */
 #define RCOL_ROMAN          (1u << 6)

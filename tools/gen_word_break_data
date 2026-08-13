@@ -1,0 +1,103 @@
+#!/usr/bin/env luajit
+
+-- Generate the compiled Unicode Word_Break range table used by --roman.
+-- Input must be Unicode 17.0.0's official WordBreakProperty.txt.
+
+local input_path = assert(arg[1], "usage: gen_word_break_data INPUT OUTPUT")
+local output_path = assert(arg[2], "usage: gen_word_break_data INPUT OUTPUT")
+local expected_hash = "72274cac1e6b919507db35655c3e175aa27274668a1ece95c28d2069f2ad9852"
+
+local function shell_quote(s)
+	return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local hash_pipe = assert(io.popen("sha256sum -- " .. shell_quote(input_path), "r"))
+local hash_line = assert(hash_pipe:read("*l"), "sha256sum produced no output")
+assert(hash_pipe:close(), "sha256sum failed")
+local actual_hash = assert(hash_line:match("^([0-9a-f]+)"), "cannot parse sha256sum output")
+assert(actual_hash == expected_hash, "unexpected WordBreakProperty.txt SHA-256")
+
+local tags = {
+	ALetter = "a_letter",
+	CR = "cr",
+	Double_Quote = "double_quote",
+	Extend = "extend",
+	ExtendNumLet = "extend_num_let",
+	Format = "format",
+	Hebrew_Letter = "hebrew_letter",
+	Katakana = "katakana",
+	LF = "lf",
+	MidLetter = "mid_letter",
+	MidNum = "mid_num",
+	MidNumLet = "mid_num_let",
+	Newline = "newline",
+	Numeric = "numeric",
+	Regional_Indicator = "regional_indicator",
+	Single_Quote = "single_quote",
+	WSegSpace = "w_seg_space",
+	ZWJ = "zwj",
+}
+
+local ranges = {}
+for line in assert(io.lines(input_path)) do
+	local first, last, property = line:match("^([0-9A-F]+)%.%.([0-9A-F]+)%s*;%s*([%w_]+)")
+	if not first then
+		first, property = line:match("^([0-9A-F]+)%s*;%s*([%w_]+)")
+		last = first
+	end
+	if first then
+		assert(tags[property], "unknown Word_Break property: " .. property)
+		ranges[#ranges + 1] = {
+			first = tonumber(first, 16),
+			last = tonumber(last, 16),
+			property = tags[property],
+		}
+	end
+end
+
+table.sort(ranges, function(a, b) return a.first < b.first end)
+for i = 2, #ranges do
+	assert(ranges[i - 1].last < ranges[i].first, "overlapping Word_Break ranges")
+end
+
+local out = assert(io.open(output_path, "w"))
+out:write("//! Generated Unicode 17.0.0 Word_Break data. DO NOT EDIT.\n")
+out:write("//! Source: https://www.unicode.org/Public/17.0.0/ucd/auxiliary/WordBreakProperty.txt\n")
+out:write("//! SHA-256: ", expected_hash, "\n")
+out:write("//! Regenerate with `tools/gen_word_break_data INPUT src/word_break_data.zig`.\n\n")
+out:write("pub const Property = enum(u8) {\n")
+out:write("    other,\n")
+local ordered_tags = {}
+for _, tag in pairs(tags) do ordered_tags[#ordered_tags + 1] = tag end
+table.sort(ordered_tags)
+for _, tag in ipairs(ordered_tags) do out:write("    ", tag, ",\n") end
+out:write("};\n\n")
+out:write("const Range = struct { first: u21, last: u21, property: Property };\n\n")
+out:write("const ranges = [_]Range{\n")
+for _, range in ipairs(ranges) do
+	out:write(string.format(
+		"    .{ .first = 0x%X, .last = 0x%X, .property = .%s },\n",
+		range.first,
+		range.last,
+		range.property
+	))
+end
+out:write("};\n\n")
+out:write("/// Return the pinned Unicode Word_Break property without consulting host data.\n")
+out:write("pub fn property(cp: u21) Property {\n")
+out:write("    var lo: usize = 0;\n")
+out:write("    var hi: usize = ranges.len;\n")
+out:write("    while (lo < hi) {\n")
+out:write("        const mid = lo + (hi - lo) / 2;\n")
+out:write("        const range = ranges[mid];\n")
+out:write("        if (cp < range.first) {\n")
+out:write("            hi = mid;\n")
+out:write("        } else if (cp > range.last) {\n")
+out:write("            lo = mid + 1;\n")
+out:write("        } else {\n")
+out:write("            return range.property;\n")
+out:write("        }\n")
+out:write("    }\n")
+out:write("    return .other;\n")
+out:write("}\n")
+assert(out:close())

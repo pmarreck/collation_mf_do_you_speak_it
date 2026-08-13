@@ -297,6 +297,11 @@ assert_order "by value"              --roman -- IV VII IX X XL L MCMXCIV MMXXVI
 assert_order "embedded in text"      --roman -- "Chapter IV" "Chapter VII" "Chapter IX"
 assert_order "lowercase forms"       --roman -- iv vii ix
 assert_order "Unicode numeral chars" --roman -- Ⅳ Ⅶ Ⅸ
+assert_order "Unicode punctuation boundary" --roman -- "VII—" "IX—"
+assert_order "Unicode symbol boundary"      --roman -- "VII™" "IX™"
+assert_order "Unicode letter continuation" --roman -- "MIXé" "MIXf"
+assert_order "digit continuation"          --roman -- IX2 VII2
+assert_order "connector continuation"      --roman -- IX_ VII_
 assert_order "OFF by default"                -- IX VII
 # Words built only from Roman letters must stay words. Before the whole-token
 # fix these inverted, because a failed parse re-entered mid-word and matched the
