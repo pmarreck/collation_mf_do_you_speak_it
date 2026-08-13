@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 353 passed, 0 failed (90 Zig unit + 3 C unit + 260 CLI integration).
+Current test count: 354 passed, 0 failed (91 Zig unit + 3 C unit + 260 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -279,6 +279,33 @@ Current test count: 353 passed, 0 failed (90 Zig unit + 3 C unit + 260 CLI integ
       changes with product/API tradeoffs: Unicode-symbol boundaries for `--roman`,
       a reported allocation-failure path in the C comparison API, and a
       same-machine baseline threshold in `./bm`.
+      - [ ] Explain and decide what ends an ASCII Roman-numeral token before
+            changing `--roman`. *Poke: Unicode has boundary algorithms and
+            properties, not a single “boundary punctuation” code point; combining
+            marks and unsupported scripts must not silently become separators.*
+      - [ ] Replace ambiguous FFI failure sentinels with an explicit checked C
+            ABI. Breaking the pre-release ABI is allowed when it yields the
+            cleaner contract. *Poke: comparison equality, empty-string key
+            lengths, NULL handles, OOM, and insufficient buffers must remain
+            distinguishable without consulting hidden global state.*
+      - [x] Keep implementation-performance measurements as recorded telemetry;
+            hard-gate only the input-scaling complexity measurements. *Poke:
+            name and store the two result kinds distinctly so a future agent
+            cannot accidentally add a wall-clock baseline gate.* (Peter,
+            2026-08-13 15:05 EDT)
+      - [x] Promote the performance-versus-complexity benchmark distinction to
+            global shared memory for use across projects. *Poke: preserve that
+            performance telemetry remains valuable and source-controlled even
+            though ordinary wall-clock drift is not a blocking threshold.*
+            (Peter + Codex, 2026-08-13 15:05 EDT)
+      - [ ] Separate performance and complexity benchmark records and clarify
+            whether an unexpectedly low scaling ratio should block or merely
+            demand review. *Poke: fixed overhead can make small-N ratios look
+            artificially low.*
+      - [x] Classify thin space U+2009 and narrow no-break space U+202F as
+            structural whitespace, matching NBSP U+00A0. *Poke: assert the
+            classifier over a set containing whitespace and lookalike
+            punctuation/symbol controls.* (2026-08-13 15:10 EDT)
 - [x] **Independent Grok codebase review.** Full 13-dimension audit at
       `5f4ca05` written to `GROK_FEEDBACK.md`. August 5 criticals re-verified
       fixed. New warnings: `--version-sort` after `-n`/`-s`, ASCII-only

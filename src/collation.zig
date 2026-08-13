@@ -478,9 +478,16 @@ fn emitExpansion(l1: *L1, l2: *L1, l3: *L1, alloc: std.mem.Allocator, rep: []con
 /// Is this code point whitespace for structural-first purposes?
 fn isSpace(cp: u21) bool {
     return switch (cp) {
-        ' ', '\t', '\n', '\r', 0x0B, 0x0C, 0x00A0 => true, // incl. NBSP
+        ' ', '\t', '\n', '\r', 0x0B, 0x0C, 0x00A0, 0x2009, 0x202F => true,
         else => false,
     };
+}
+
+test "space classifier includes supported Unicode spaces and rejects lookalikes" {
+    const whitespace = [_]u21{ ' ', '\t', '\n', '\r', 0x0B, 0x0C, 0x00A0, 0x2009, 0x202F };
+    const non_whitespace = [_]u21{ '.', '_', 0x2014, 0x200B, 0x2060 };
+    for (whitespace) |cp| try std.testing.expect(isSpace(cp));
+    for (non_whitespace) |cp| try std.testing.expect(!isSpace(cp));
 }
 
 /// Return the byte length of a below-mark that Romanian legacy data uses for
