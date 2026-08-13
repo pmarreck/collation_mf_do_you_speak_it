@@ -713,6 +713,20 @@ static int cmp_rows(const void *pa, const void *pb) {
     return 0;
 }
 
+/* Write the completed sort as one checked stream operation sequence. Checking
+ * the final flush catches buffered failures such as a full output device. */
+static int write_rows(FILE *out, const row_t *rows, size_t count) {
+    for (size_t k = 0; k < count; k++) {
+        if (rows[k].line_len > 0
+            && fwrite(rows[k].line, 1, rows[k].line_len, out) != rows[k].line_len) {
+            return -1;
+        }
+        if (fputc('\n', out) == EOF) return -1;
+    }
+    if (fflush(out) == EOF) return -1;
+    return ferror(out) ? -1 : 0;
+}
+
 /* Locate the (1-based) Nth field of `line` when split on the `sep` substring,
  * returning the field's [ptr,len) via out-params. With no separator (sep NULL
  * or empty) or n < 1, the whole line is the field. A line with fewer than n
@@ -833,9 +847,15 @@ static int cmd_sort(const char *path, uint32_t options,
 
     if (exit_code == 0) {
         qsort(rows, idx, sizeof(row_t), cmp_rows);
-        for (size_t k = 0; k < idx; k++) {
-            fwrite(rows[k].line, 1, rows[k].line_len, stdout);
-            fputc('\n', stdout);
+        if (write_rows(stdout, rows, idx) != 0) {
+            int write_errno = errno;
+            exit_code = 1;
+            if (write_errno != 0) {
+                fprintf(stderr, "collate: write error on stdout: %s\n",
+                        strerror(write_errno));
+            } else {
+                fputs("collate: write error on stdout\n", stderr);
+            }
         }
     }
 

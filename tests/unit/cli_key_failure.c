@@ -42,6 +42,20 @@ int main(void) {
 	free(key);
 	if (coll != NULL) rcol_close(coll);
 
+	row_t row = {
+		.line = (const uint8_t *)"x",
+		.line_len = 1,
+		.key = NULL,
+		.key_len = 0,
+	};
+	FILE *read_only = fopen(__FILE__, "rb");
+	if (read_only != NULL && write_rows(read_only, &row, 1) != 0) {
+		passed++;
+	} else {
+		failed++;
+	}
+	if (read_only != NULL) fclose(read_only);
+
 	printf("cli_key_failure: %d passed, %d failed\n", passed, failed);
 	return failed;
 }

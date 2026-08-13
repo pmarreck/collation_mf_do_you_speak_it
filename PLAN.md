@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 348 passed, 0 failed (87 Zig unit + 2 C unit + 259 CLI integration).
+Current test count: 350 passed, 0 failed (87 Zig unit + 3 C unit + 260 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -311,8 +311,10 @@ Current test count: 348 passed, 0 failed (87 Zig unit + 2 C unit + 259 CLI integ
             `NIX_BUILD_TOP` and uses direct Zig commands; the exact x86_64-linux
             check passes all 348 tests. Also removed unsupported x86_64-darwin
             flake outputs found during target evaluation. (2026-08-13 12:37 EDT)
-      - [ ] Fail loudly on stdout write/flush errors. *Poke: SIGPIPE and `/dev/full`
-            may fail through different stdio paths and must never exit 0.*
+      - [x] Fail loudly on stdout write/flush errors. *Poke: SIGPIPE and `/dev/full`
+            may fail through different stdio paths and must never exit 0.* A
+            checked `FILE *` writer covers short writes, newline writes, and
+            final flush; C and `/dev/full` regressions pass. (2026-08-13 12:39 EDT)
       - [ ] Correct stale public/internal prose and remove proven dead state.
             *Poke: keep scientific comma semantics and the eight prepare-phase
             locale names exact.*

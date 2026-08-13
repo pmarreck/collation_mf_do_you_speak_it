@@ -101,6 +101,20 @@ else
 	fail "no-trailing-newline got '$out'"
 fi
 
+# ── failed stdout write => exit 1 with captured diagnostic ──
+if [[ -e /dev/full ]]; then
+	printf 'a\n' | "$CLI" >/dev/full 2>"$WORK/write-error.txt"
+	rc=$?
+	err=$(<"$WORK/write-error.txt")
+	if [[ $rc -eq 1 && "$err" == *"write error"* ]]; then
+		pass "stdout write failure exits 1"
+	else
+		fail "stdout write failure rc=$rc stderr='$err'"
+	fi
+else
+	echo "  skip: /dev/full unavailable (C unit still covers write failure)" >&2
+fi
+
 echo ""
 echo "cli_surface: $PASS passed, $FAIL failed"
 exit $FAIL
