@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 335 passed, 0 failed (86 Zig unit + 249 CLI integration).
+Current test count: 340 passed, 0 failed (86 Zig unit + 254 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -287,11 +287,14 @@ Current test count: 335 passed, 0 failed (86 Zig unit + 249 CLI integration).
       silent write errors, `RCOL_DECIMAL_COMMA` header lie. (2026-08-13 12:20 EDT)
 - [ ] **Resolve verified Grok review findings in small green commits.** Preserve
       the independent review artifact separately from implementation changes.
-      - [ ] Baseline `./test`, verify the review-artifact diff, and commit
+      - [x] Baseline `./test`, verify the review-artifact diff, and commit
             `GROK_FEEDBACK.md` + its plan/dirtree metadata. *Poke: a green Zig-only
             check is insufficient; the baseline must include every CLI suite.*
-      - [ ] Make later `--version-sort` clear every decimal/scientific mode.
+            (2026-08-13 12:24 EDT)
+      - [x] Make later `--version-sort` clear every decimal/scientific mode.
             *Poke: cover both short and long forms that can leave bits behind.*
+            Five red-to-green CLI regressions cover `-n`, `--numeric`, `-s`,
+            `--scientific`, and stale comma-mode state. (2026-08-13 12:25 EDT)
       - [ ] Fold fullwidth and mathematical digits in scientific exponents.
             *Poke: cover upper/lower exponent markers, exponent signs, negative
             values, and invalid suffix boundaries.*

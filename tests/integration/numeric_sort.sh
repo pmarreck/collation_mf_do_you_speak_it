@@ -119,6 +119,11 @@ assert_order "--decimal = real number order" -d -- 1.10 1.2 1.9
 assert_order "--decimal reads embedded too"  -d -- v1.10 v1.9
 assert_order "--decimal negative fractions"  -d -- -2 -1.5 -1.4 -1
 assert_order "-d then --version-sort wins"   -d --version-sort -- 1.9 1.10
+assert_order "-n then --version-sort wins"   -n --version-sort -- 1.9 1.10
+assert_order "--numeric then --version-sort wins" --numeric --version-sort -- 1.9 1.10
+assert_order "-s then --version-sort wins"   -s --version-sort -- 1.9 1.10
+assert_order "--scientific then --version-sort wins" --scientific --version-sort -- 1.9 1.10
+assert_order "--version-sort resets comma mode too" --numeric=, --version-sort --scientific -- 1,5e4 2e3
 
 echo "── grouped numbers: OFF by default ──"
 assert_order "default splits on separators"  -- 1,000,000.00 999,999.00

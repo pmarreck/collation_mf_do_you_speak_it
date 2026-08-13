@@ -914,8 +914,10 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(a, "--version-sort") == 0) {
                 /* The explicit form of the default. Present so a later argument
-                 * can override an earlier --decimal, per the CLI convention. */
-                options &= ~(uint32_t)RCOL_DECIMAL;
+                 * can override an earlier numeric mode, per the CLI convention. */
+                options &= ~((uint32_t)RCOL_DECIMAL
+                             | (uint32_t)RCOL_DECIMAL_COMMA
+                             | (uint32_t)RCOL_SCIENTIFIC);
             } else if (strcmp(a, "--field-separator") == 0) {
                 if (i + 1 >= argc) {
                     fputs("collate: --field-separator requires an argument\n", stderr);
