@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 360 passed, 0 failed (92 Zig unit + 3 C unit + 265 CLI integration).
+Current test count: 362 passed, 0 failed (94 Zig unit + 3 C unit + 265 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -289,11 +289,15 @@ Current test count: 360 passed, 0 failed (92 Zig unit + 3 C unit + 265 CLI integ
             unrelated input row must never change another row's sort key.*
             Implemented with generated Unicode 17.0.0 Word_Break data and
             two-sided UAX #29 rules. (Peter + Codex, 2026-08-13 16:14 EDT)
-      - [ ] Replace ambiguous FFI failure sentinels with an explicit checked C
+      - [x] Replace ambiguous FFI failure sentinels with an explicit checked C
             ABI. Breaking the pre-release ABI is allowed when it yields the
             cleaner contract. *Poke: comparison equality, empty-string key
             lengths, NULL handles, OOM, and insufficient buffers must remain
-            distinguishable without consulting hidden global state.*
+            distinguishable without consulting hidden global state.* Replaced
+            the ambiguous and POSIX-shaped calls with fixed-width statuses,
+            result out-parameters, a size-versioned configuration, complete-key
+            buffer semantics, stable status names, and injected-OOM tests.
+            (Peter + Codex, 2026-08-13 16:24 EDT)
       - [x] Keep implementation-performance measurements as recorded telemetry;
             hard-gate only the input-scaling complexity measurements. *Poke:
             name and store the two result kinds distinctly so a future agent

@@ -25,9 +25,9 @@ changing one changes the *product*, not just an implementation detail.
 
 ## Correctness invariants
 
-3. **Sort-key order == compare order.** `rcol_get_sort_key` must produce
+3. **Sort-key order == compare order.** `rcol_sort_key_utf8` must produce
    a key whose `memcmp`/lexicographic order is identical to
-   `rcol_strcoll8` for the same collator. This is enforced by
+   `rcol_compare_utf8` for the same collator. This is enforced by
    construction (compare is defined via the key builder) and property-tested
    over random strings. Never let them diverge.
 

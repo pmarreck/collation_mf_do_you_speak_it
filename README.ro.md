@@ -65,7 +65,7 @@ ajutorul românesc complet.
 ## API, măsurători și limite
 
 API-ul C este în [include/romantic_collation.h](include/romantic_collation.h):
-`rcol_open`, `rcol_strcoll8`, `rcol_get_sort_key` și `rcol_close`. Nucleul Zig
+`rcol_open`, `rcol_compare_utf8`, `rcol_sort_key_utf8` și `rcol_close`. Nucleul Zig
 este pur; CLI-ul C folosește acel API. `./bm` înregistrează măsurători, iar
 `./fuzz` verifică invariantele de ordine cu o sămânță reproductibilă.
 

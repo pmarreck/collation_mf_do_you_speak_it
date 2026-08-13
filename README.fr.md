@@ -68,7 +68,7 @@ collate [OPTIONS] [FICHIER]
 ## API, mesures et limites
 
 L’API C est dans [include/romantic_collation.h](include/romantic_collation.h) :
-`rcol_open`, `rcol_strcoll8`, `rcol_get_sort_key` et `rcol_close`. Le cœur Zig
+`rcol_open`, `rcol_compare_utf8`, `rcol_sort_key_utf8` et `rcol_close`. Le cœur Zig
 est pur ; la CLI C passe par cette API. `./bm` consigne les mesures et `./fuzz`
 vérifie les invariants d’ordre avec une graine reproductible.
 

@@ -91,11 +91,35 @@ extern "C" {
  * and therefore below every letter, per the structural-first rule. */
 #define RCOL_ROMAN          (1u << 6)
 
-/* ── Comparison result (mirrors ICU's UCollationResult) ────────────────── */
+/* ── Status and comparison results ─────────────────────────────────────── */
+
+/* Fixed-width status type keeps the ABI stable across C compilers. Every
+ * fallible call returns one of these; useful results use out-parameters. */
+typedef int32_t rcol_status;
+
+#define RCOL_OK                 ((rcol_status)0)
+#define RCOL_INVALID_ARGUMENT   ((rcol_status)1)
+#define RCOL_OUT_OF_MEMORY      ((rcol_status)2)
+#define RCOL_BUFFER_TOO_SMALL   ((rcol_status)3)
+#define RCOL_UNSUPPORTED_ABI    ((rcol_status)4)
+#define RCOL_UNSUPPORTED_OPTION ((rcol_status)5)
 
 #define RCOL_LESS     (-1)
 #define RCOL_EQUAL      0
 #define RCOL_GREATER    1
+
+#define RCOL_ABI_VERSION 1u
+
+/* `struct_size` permits future fields to be appended without breaking callers;
+ * `abi_version` changes only when an incompatible ABI is introduced. */
+typedef struct rcol_config {
+    size_t struct_size;
+    uint32_t abi_version;
+    uint32_t options;
+} rcol_config;
+
+#define RCOL_CONFIG_INIT(options_) \
+    { sizeof(rcol_config), RCOL_ABI_VERSION, (uint32_t)(options_) }
 
 /* ── Opaque collator handle (analog of ICU's UCollator) ────────────────── */
 
@@ -110,11 +134,14 @@ typedef struct rcol_collator rcol_collator;
 const char *rcol_version(void);
 
 /**
- * Open a collator for the given options bitmask (analog of `ucol_open`).
- * There is no locale string in v1 — the opinionated root order is the only
- * order. Returns NULL on allocation failure. Free with rcol_close.
+ * Open a collator through a size-versioned configuration. There is no locale
+ * string in v1; the opinionated root order is the only order.
+ *
+ * `config` and `out_collator` are required. On every failure where
+ * `out_collator` is non-NULL, it is set to NULL. Free a successful handle with
+ * rcol_close.
  */
-rcol_collator *rcol_open(uint32_t options);
+rcol_status rcol_open(const rcol_config *config, rcol_collator **out_collator);
 
 /**
  * Close/free a collator returned by rcol_open. NULL-safe.
@@ -122,50 +149,46 @@ rcol_collator *rcol_open(uint32_t options);
 void rcol_close(rcol_collator *coll);
 
 /**
- * Compare two UTF-8 byte strings (analog of `ucol_strcollUTF8`).
- * Returns RCOL_LESS / _EQUAL / _GREATER (-1 / 0 / 1).
+ * Compare two explicit-length UTF-8 byte strings. On RCOL_OK, `out_order` is
+ * set to RCOL_LESS / RCOL_EQUAL / RCOL_GREATER. It is unchanged on failure, so
+ * equality can never be confused with an allocation error.
+ *
+ * A string pointer may be NULL only when its corresponding length is zero.
  */
-int rcol_strcoll8(
+rcol_status rcol_compare_utf8(
     const rcol_collator *coll,
     const uint8_t *a, size_t alen,
-    const uint8_t *b, size_t blen
+    const uint8_t *b, size_t blen,
+    int32_t *out_order
 );
 
 /**
  * Write a binary sort key for `s` into `out` (analog of `ucol_getSortKey`).
- * The key's `memcmp` order equals `rcol_strcoll8` order — precompute
+ * The key's `memcmp` order equals `rcol_compare_utf8` order — precompute
  * once, compare many. The key is NUL-terminated. House-style keys contain no
  * interior NUL, so C callers may compare them with `strcmp`/`memcmp`.
  * RCOL_CODE_POINT keys mirror the explicit-length input bytes and can contain
  * an interior NUL if the input does; compare those with `memcmp` and the
  * returned length.
  *
- * Returns the total number of bytes the full key needs (including the trailing
- * NUL). If that exceeds `out_cap`, the key was truncated but the returned
- * length tells the caller how large a buffer to allocate for a full retry.
- * `out` may be NULL when `out_cap` is 0 (length-probe call).
+ * `out_required` is required and receives the complete key size, including the
+ * trailing NUL, after successful key construction. `out == NULL, out_cap == 0`
+ * is a successful length probe. An undersized nonzero buffer returns
+ * RCOL_BUFFER_TOO_SMALL and remains untouched; retry with `out_required` bytes.
+ * A string pointer may be NULL only when `slen` is zero.
  */
-size_t rcol_get_sort_key(
+rcol_status rcol_sort_key_utf8(
     const rcol_collator *coll,
     const uint8_t *s, size_t slen,
-    uint8_t *out, size_t out_cap
+    uint8_t *out, size_t out_cap,
+    size_t *out_required
 );
 
-/* ── POSIX-shaped convenience wrappers (default house-style options) ─────── */
-
 /**
- * Drop-in analog of C `strcoll`: compare two NUL-terminated UTF-8 strings
- * using the default house-style order. Returns -1 / 0 / 1.
+ * Return a statically allocated English name for a status code. Unknown values
+ * return "unknown status". Never returns NULL; do not free the result.
  */
-int rcol_strcoll(const char *a, const char *b);
-
-/**
- * Drop-in analog of C `strxfrm`: transform `src` into a sort key written to
- * `dst` (up to `n` bytes, NUL-terminated if it fits) using default house-style
- * options. Returns the length the full key needs (excluding the trailing NUL),
- * matching `strxfrm` semantics. `dst` may be NULL when `n` is 0.
- */
-size_t rcol_strxfrm(char *dst, const char *src, size_t n);
+const char *rcol_status_name(rcol_status status);
 
 #ifdef __cplusplus
 }

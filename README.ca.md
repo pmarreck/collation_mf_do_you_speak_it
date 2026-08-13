@@ -64,7 +64,7 @@ catalana completa.
 ## API, mesures i límits
 
 L’API C és a [include/romantic_collation.h](include/romantic_collation.h):
-`rcol_open`, `rcol_strcoll8`, `rcol_get_sort_key` i `rcol_close`. El nucli Zig
+`rcol_open`, `rcol_compare_utf8`, `rcol_sort_key_utf8` i `rcol_close`. El nucli Zig
 és pur; la CLI C utilitza aquesta API. `./bm` registra mesures i `./fuzz`
 verifica els invariants d’ordre amb una llavor reproduïble.
 

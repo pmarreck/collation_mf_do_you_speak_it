@@ -67,7 +67,7 @@ española completa.
 ## API, mediciones y límites
 
 La API C está en [include/romantic_collation.h](include/romantic_collation.h):
-`rcol_open`, `rcol_strcoll8`, `rcol_get_sort_key` y `rcol_close`. El núcleo Zig
+`rcol_open`, `rcol_compare_utf8`, `rcol_sort_key_utf8` y `rcol_close`. El núcleo Zig
 es puro; la CLI C usa esa API. `./bm` registra mediciones y `./fuzz` comprueba
 invariantes de orden con una semilla reproducible.
 

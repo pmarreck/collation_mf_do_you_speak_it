@@ -33,12 +33,12 @@ annotate=[
 	flake.nix = Nix flake: Zig pinned via mitchellh/zig-overlay; packages.default + checks.build/test + dev shell (hyperfine, ICU, luajit)
 	fuzz = ./fuzz — property fuzzer driver; checks ORDERING laws (level alignment, numeric/case/expansion oracles) not just crashes; prints its seed so any failure reproduces exactly
 	include = Public C API header (the real public interface)
-	include/romantic_collation.h = Public C FFI header, modeled on ICU4C ucol_* but UTF-8 bytes+len; option bits (CODE_POINT/NUMERIC/CASE_SENSITIVE/DECIMAL)
+	include/romantic_collation.h = Public checked C ABI: fixed-width statuses, size-versioned config, explicit UTF-8 compare and complete sort-key contracts, options
 	result = Nix build output symlink (gitignored GC root); ./build refreshes it
 	src = Pure Zig core + C FFI adapter (hexagonal: no I/O below the CLI)
 	src/collation.zig = PURE core, no I/O: multi-level sort-key builder (L1 structural class+base letter, L2 diacritic/digit-style, L3 case/leading-zeros), foldLetter + compatExpand (n-character expansions) + digitAt (fullwidth/math digit folding), arbitrary-precision numeric runs, signs, decimal/grouped/scientific modes, compareAlloc; all unit tests
 	src/fuzz.zig = Property fuzzer: structural |L2|==|L3| level-alignment check plus independent numeric/case-fold/expansion oracles, over 8 option sets and 3 input shapes (structured, raw bytes, digits-only); the algebraic order laws are kept only as cheap guards since memcmp makes them vacuous
-	src/lib.zig = C FFI adapter: rcol_* export fns (open/close/strcoll8/get_sort_key/strcoll/strxfrm/version) over the Zig core
+	src/lib.zig = Checked C FFI adapter: size-versioned open config, explicit status/out-parameter compare and sort-key APIs, close/status-name/version over the pure Zig core
 	src/word_break_data.zig = Generated pinned Unicode 17.0.0 Word_Break range table used for Roman token boundaries
 	test = ./test — master runner: nix-built binary + Zig unit tests + all tests/integration/*.sh; exit code = failure count
 	tests = Test suites (integration; Zig unit tests live inline in src/)

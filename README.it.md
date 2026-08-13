@@ -66,7 +66,7 @@ italiano completo.
 ## API, misure e limiti
 
 L’API C è in [include/romantic_collation.h](include/romantic_collation.h):
-`rcol_open`, `rcol_strcoll8`, `rcol_get_sort_key` e `rcol_close`. Il nucleo Zig
+`rcol_open`, `rcol_compare_utf8`, `rcol_sort_key_utf8` e `rcol_close`. Il nucleo Zig
 è puro; la CLI C usa questa API. `./bm` registra le misure e `./fuzz` verifica
 gli invarianti d’ordine con un seme riproducibile.
 

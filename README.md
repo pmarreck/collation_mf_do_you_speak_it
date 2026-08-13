@@ -134,14 +134,23 @@ The C surface mirrors ICU4C's `ucol_*` collator API, but is UTF-8-native
 [`include/romantic_collation.h`](include/romantic_collation.h).
 
 ```c
-rcol_collator *c = rcol_open(0); /* 0 = house style */
-int r = rcol_strcoll8(c, a, alen, b, blen);      /* -1 / 0 / +1 */
-size_t n = rcol_get_sort_key(c, s, slen, out, cap); /* memcmp == strcoll8 */
+rcol_config config = RCOL_CONFIG_INIT(0); /* 0 = house style */
+rcol_collator *c = NULL;
+if (rcol_open(&config, &c) != RCOL_OK) { /* handle failure */ }
+
+int32_t order;
+if (rcol_compare_utf8(c, a, alen, b, blen, &order) != RCOL_OK) {
+    /* equality is never confused with failure */
+}
+
+size_t required;
+rcol_status status = rcol_sort_key_utf8(c, s, slen, out, cap, &required);
 rcol_close(c);
 ```
 
-Plus POSIX-shaped drop-ins: `rcol_strcoll(a, b)` and
-`rcol_strxfrm(dst, src, n)`.
+Every fallible call returns `rcol_status`; useful values use out-parameters.
+Length probes pass `out = NULL, out_cap = 0`. An undersized sort-key buffer
+returns `RCOL_BUFFER_TOO_SMALL`, reports `required`, and remains untouched.
 
 ## Benchmarks
 

@@ -647,8 +647,8 @@ typedef struct {
     size_t key_len;
 } row_t;
 
-typedef size_t (*sort_key_fn)(const rcol_collator *, const uint8_t *, size_t,
-                              uint8_t *, size_t);
+typedef rcol_status (*sort_key_fn)(const rcol_collator *, const uint8_t *, size_t,
+                                   uint8_t *, size_t, size_t *);
 
 typedef enum {
     SORT_KEY_OK = 0,
@@ -661,21 +661,33 @@ typedef enum {
 static sort_key_status build_sort_key(sort_key_fn get_sort_key,
                                       const rcol_collator *coll,
                                       const uint8_t *src, size_t src_len,
-                                      uint8_t **out_key, size_t *out_len) {
+                                      uint8_t **out_key, size_t *out_len,
+                                      rcol_status *out_status) {
     *out_key = NULL;
     *out_len = 0;
+    *out_status = RCOL_OK;
     if (src_len > (SIZE_MAX - 16) / 6) return SORT_KEY_ALLOC_FAILED;
 
     size_t cap = src_len * 6 + 16;
     uint8_t *key = (uint8_t *)malloc(cap);
     if (!key) return SORT_KEY_ALLOC_FAILED;
 
-    size_t need = get_sort_key(coll, src, src_len, key, cap);
-    if (need == 0) {
+    size_t need = 0;
+    rcol_status status = get_sort_key(coll, src, src_len, key, cap, &need);
+    if (status != RCOL_OK && status != RCOL_BUFFER_TOO_SMALL) {
+        *out_status = status;
         free(key);
         return SORT_KEY_BUILD_FAILED;
     }
-    if (need > cap) {
+    if (status == RCOL_OK && (need == 0 || need > cap)) {
+        free(key);
+        return SORT_KEY_BUILD_FAILED;
+    }
+    if (status == RCOL_BUFFER_TOO_SMALL) {
+        if (need <= cap) {
+            free(key);
+            return SORT_KEY_BUILD_FAILED;
+        }
         uint8_t *grown = (uint8_t *)realloc(key, need);
         if (!grown) {
             free(key);
@@ -683,8 +695,9 @@ static sort_key_status build_sort_key(sort_key_fn get_sort_key,
         }
         key = grown;
         cap = need;
-        need = get_sort_key(coll, src, src_len, key, cap);
-        if (need == 0 || need > cap) {
+        status = get_sort_key(coll, src, src_len, key, cap, &need);
+        if (status != RCOL_OK || need > cap) {
+            *out_status = status;
             free(key);
             return SORT_KEY_BUILD_FAILED;
         }
@@ -802,11 +815,14 @@ static int cmd_sort(const char *path, uint32_t options,
         return 1;
     }
 
-    rcol_collator *coll = rcol_open(options);
-    if (!coll) {
+    rcol_config config = RCOL_CONFIG_INIT(options);
+    rcol_collator *coll = NULL;
+    rcol_status open_status = rcol_open(&config, &coll);
+    if (open_status != RCOL_OK) {
         free(rows);
         free(data);
-        fputs("collate: failed to open collator\n", stderr);
+        fprintf(stderr, "collate: failed to open collator: %s\n",
+                rcol_status_name(open_status));
         return 1;
     }
     size_t idx = 0;
@@ -825,11 +841,23 @@ static int cmd_sort(const char *path, uint32_t options,
             extract_field(line, line_len, sep, sep_len, key_field, &ksrc, &ksrc_len);
             uint8_t *key;
             size_t need;
+            rcol_status ffi_status;
             sort_key_status key_status = build_sort_key(
-                rcol_get_sort_key, coll, ksrc, ksrc_len, &key, &need);
+                rcol_sort_key_utf8, coll, ksrc, ksrc_len, &key, &need,
+                &ffi_status);
             if (key_status != SORT_KEY_OK) {
                 exit_code = 1;
-                fputs("collate: out of memory\n", stderr);
+                if (key_status == SORT_KEY_ALLOC_FAILED
+                    || ffi_status == RCOL_OUT_OF_MEMORY) {
+                    fputs("collate: out of memory\n", stderr);
+                } else {
+                    if (ffi_status == RCOL_OK) {
+                        fputs("collate: sort-key API contract violation\n", stderr);
+                    } else {
+                        fprintf(stderr, "collate: sort-key failure: %s\n",
+                                rcol_status_name(ffi_status));
+                    }
+                }
                 break;
             }
             rows[idx].line = line;
