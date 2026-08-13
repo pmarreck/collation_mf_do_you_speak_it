@@ -21,7 +21,10 @@ pub const Version = struct {
     pub const major: u8 = 0;
     pub const minor: u8 = 1;
     pub const patch: u8 = 0;
-    pub const string: [:0]const u8 = "0.1.0";
+    pub const string: [:0]const u8 = std.fmt.comptimePrint(
+        "{d}.{d}.{d}",
+        .{ major, minor, patch },
+    );
 };
 
 // ─── Opaque collator handle ──────────────────────────────────────────────

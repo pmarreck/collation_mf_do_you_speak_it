@@ -56,8 +56,9 @@ extern "C" {
  * used for version strings: `v1.10 < v1.9` under this option. */
 #define RCOL_DECIMAL        (1u << 3)
 
-/* With RCOL_DECIMAL, ',' is the decimal separator and '.' groups digits
- * (continental convention) rather than the reverse. Ignored without DECIMAL.
+/* With RCOL_DECIMAL or RCOL_SCIENTIFIC, ',' is the decimal separator rather
+ * than '.'. Digit-group absorption still requires RCOL_DECIMAL; without either
+ * numeric-mode bit, this setting has no effect.
  *
  * This is a DECLARATION by the caller, never an inference from the data: `1.234`
  * is genuinely ambiguous between 1234 and 1.234, and nothing in the bytes

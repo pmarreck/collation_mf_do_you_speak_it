@@ -315,9 +315,12 @@ Current test count: 350 passed, 0 failed (87 Zig unit + 3 C unit + 260 CLI integ
             may fail through different stdio paths and must never exit 0.* A
             checked `FILE *` writer covers short writes, newline writes, and
             final flush; C and `/dev/full` regressions pass. (2026-08-13 12:39 EDT)
-      - [ ] Correct stale public/internal prose and remove proven dead state.
+      - [x] Correct stale public/internal prose and remove proven dead state.
             *Poke: keep scientific comma semantics and the eight prepare-phase
-            locale names exact.*
+            locale names exact.* The header now distinguishes decimal-mark and
+            grouping behavior; RULES lists all eight catalogs; dead `g_coll`
+            and the stale numeric comment are gone; the version string derives
+            from its public numeric components. (2026-08-13 12:41 EDT)
       - [ ] Strengthen the independent controls called out in the advisories:
             folded-digit fuzz shapes, finite-table coverage, FFI truncation
             contracts, and duplicated numeric encoding. *Poke: tests generated

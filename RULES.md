@@ -65,8 +65,9 @@ changing one changes the *product*, not just an implementation detail.
   localized-alias hook, English default/fallback) avoids a retrofit later.
 - PREPARE phase means: infrastructure exists and English is complete; other
   locales are non-fatal (missing app-requested locale WARNs and falls back to
-  English). Only `en` + a `de` demonstration locale exist today. Full 50-locale
-  coverage and compile/test enforcement are DEFERRED to the enforce phase (when
-  the CLI surface stabilizes). See the i18n skill for the enforce checklist.
+  English). Current catalogs are `en`, `de`, `fr`, `es`, `it`, `pt_br`, `ca`,
+  and `ro`. Full 50-locale coverage and compile/test enforcement are DEFERRED
+  to the enforce phase (when the CLI surface stabilizes). See the i18n skill
+  for the enforce checklist.
 - Precedence (highest first): `--lang <code>` / localized alias → `ROMANTIC_COLLATION_LANG`
   → `LC_ALL` → `LC_MESSAGES` → `LANG` → English.

@@ -66,7 +66,7 @@ const CLASS_PUNCT: u8 = 0x20;
 /// A NEGATIVE number, slotted between punctuation and digits so that every
 /// negative sorts below every non-negative while still ranking above bare
 /// punctuation. Only reachable for a leading signed number (see
-/// `parseLeadingNumber`).
+/// `pushLeadingNegative`).
 const CLASS_NEG: u8 = 0x28;
 const CLASS_DIGIT: u8 = 0x30;
 const CLASS_LETTER: u8 = 0x40;

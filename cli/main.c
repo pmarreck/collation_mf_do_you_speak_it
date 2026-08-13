@@ -695,8 +695,6 @@ static sort_key_status build_sort_key(sort_key_fn get_sort_key,
     return SORT_KEY_OK;
 }
 
-static const rcol_collator *g_coll; /* used by qsort comparator */
-
 /* Order by sort-key memcmp; break ties by raw line bytes for determinism. */
 static int cmp_rows(const void *pa, const void *pb) {
     const row_t *a = (const row_t *)pa;
@@ -811,8 +809,6 @@ static int cmd_sort(const char *path, uint32_t options,
         fputs("collate: failed to open collator\n", stderr);
         return 1;
     }
-    g_coll = coll;
-
     size_t idx = 0;
     size_t start = 0;
     int exit_code = 0;
