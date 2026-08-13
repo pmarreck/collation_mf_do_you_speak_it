@@ -216,7 +216,7 @@ maintained_by: agent
       alignment survived. `build.zig.zon` fingerprint regenerated, since its low 32
       bits hash the package name. 242 green, CI PASS in 38s. (2026-08-04 16:20 EDT)
 
-Current test count: 362 passed, 0 failed (94 Zig unit + 3 C unit + 265 CLI integration).
+Current test count: 368 passed, 0 failed (94 Zig unit + 3 C unit + 6 benchmark-policy unit + 265 CLI integration).
 
 - [x] **Global Spanish and Romanian Latin order.** Peter established that the
       house order remains deliberately mutable while the product is designed.
@@ -308,12 +308,16 @@ Current test count: 362 passed, 0 failed (94 Zig unit + 3 C unit + 265 CLI integ
             performance telemetry remains valuable and source-controlled even
             though ordinary wall-clock drift is not a blocking threshold.*
             (Peter + Codex, 2026-08-13 15:05 EDT)
-      - [ ] Separate performance and complexity benchmark records and clarify
+      - [x] Separate performance and complexity benchmark records and clarify
             whether an unexpectedly low scaling ratio should block or merely
             demand review. *Poke: fixed overhead can make small-N ratios look
             artificially low.* Decision: use separate `.performance.ndjson` and
             `.complexity.ndjson` streams; gate each doubling in `[1.5, 3.0)`
             after proving the smallest size is beyond startup-dominated behavior.
+            The gate now requires the base workload to take at least 5× the
+            measured empty-process time, limiting startup to 20% of its total.
+            First accepted run: startup multiple 6.892×; ratios 1.730×, 2.051×,
+            1.989×. (Peter + Codex, 2026-08-13 16:32 EDT)
       - [x] Classify thin space U+2009 and narrow no-break space U+202F as
             structural whitespace, matching NBSP U+00A0. *Poke: assert the
             classifier over a set containing whitespace and lookalike

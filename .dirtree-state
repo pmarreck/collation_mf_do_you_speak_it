@@ -17,11 +17,14 @@ annotate=[
 	README.ro.md = Romanian README edition with reciprocal language selector.
 	RULES.md = Load-bearing invariants (structural-first, no OS locale, key-order==compare-order, C-safe keys, pure core, CLI dogfoods FFI, TDD)
 	bench = Benchmark harnesses, oracle competitors, and the source-controlled results log
-	bench/82bbb9f01c00.ndjson = Benchmark log for the Threadripper 3990X machine — one record per contestant per run, _meta header line
+	bench/82bbb9f01c00.complexity.ndjson = Threadripper within-run complexity ratios and startup-control verdicts
+	bench/82bbb9f01c00.ndjson = Legacy combined Threadripper benchmark history retained unchanged
+	bench/82bbb9f01c00.performance.ndjson = Threadripper fixed-workload wall-clock and CPU-time telemetry; non-blocking by default
 	bench/gen_corpus.lua = Deterministic corpus generator (hand-rolled xorshift32 so output is byte-identical everywhere); usage: luajit gen_corpus.lua N [seed]
 	bench/icu_sort.c = Benchmark competitor: ICU4C ucol_getSortKey precompute-then-memcmp sort (the 'correct but heavy' baseline)
+	bench/policy.bash = Pure benchmark gate policy: doubling ratios in [1.5,3.0) and base workload at least 5x process startup
 	bench/strcoll_sort.c = Benchmark competitor: glibc strcoll() locale sort (the non-reproducible baseline this project replaces)
-	bm = ./bm — hyperfine comparison vs sort/ICU/strcoll oracles + machine-independent O(n log n) scaling gate; appends bench/<machine-id>.ndjson
+	bm = Runs non-blocking fixed-workload CPU/wall performance telemetry plus a startup-controlled two-sided complexity gate; writes separate NDJSON streams
 	build = ./build — ReleaseFast via 'nix build', installs to zig-out/bin/collate; --debug uses bare zig build
 	build.zig = Zig build: forces static-musl on native Linux, ReleaseFast default, static lib + C CLI + test step
 	build.zig.zon = Package manifest (name, 0.1.0, min Zig 0.16.0, no deps, packaged paths)
@@ -52,6 +55,7 @@ annotate=[
 	tests/integration/numeric_sort.sh = Numeric collation end-to-end: natural runs, arbitrary precision past the old 250-digit cap, bc differential oracle (independent arbitrary-precision) + sort -n corroboration, signed offset-0 rule, versions vs --decimal, and a sort -g precision negative control
 	tests/integration/readme_translations.sh = Checks reciprocal language-selector links across translated READMEs.
 	tests/unit = C-level unit tests for CLI adapter error paths
-	tests/unit/cli_key_failure.c = C adapter unit test: injects zero-length sort-key failure and pins valid empty-line keys
+	tests/unit/benchmark_policy.sh = Deterministic boundary tests for complexity ratio and startup-control classifiers; no timing
+	tests/unit/cli_key_failure.c = C adapter seam test: rejects checked sort-key contract violations, accepts valid empty-line keys, and detects output-stream failures
 	tools/gen_word_break_data = Validates official Unicode WordBreakProperty data and regenerates the compiled Zig range table
 ]

@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 # Benchmark suite for romantic_collation.
 #
-# Two parts:
-#   A) COMPARISON — wall-clock (hyperfine, median of N) of `collate` (house
+# Two distinct controls:
+#   A) PERFORMANCE TELEMETRY — wall-clock and CPU time of `collate` (house
 #      style) and `collate --code-point` vs coreutils `sort` (LC_ALL=C and a
 #      UTF-8 locale), and — when the deps compile — vs an ICU sort-key harness
 #      and a glibc `strcoll` harness. The alternatives are INDEPENDENT oracles;
-#      the numbers are the honest verdict on the "fast" claim.
-#   B) SCALING GATE — machine-independent metamorphic check: run the sort path
-#      at N, 2N, 4N, 8N and assert per-doubling time ratio stays sub-quadratic
-#      (O(n log n) ⇒ ratio ≈ 2; fail on ≥ 3). No per-machine baseline needed.
+#      the recorded numbers compare implementation throughput. Absolute timing
+#      history is non-blocking by default.
+#   B) COMPLEXITY GATE — metamorphic check: run the sort path at N, 2N, 4N, 8N
+#      and require every per-doubling ratio to stay in [1.5, 3.0). The smallest
+#      workload must also take at least 5x the empty-process startup time.
 #
-# Results are appended to bench/<machine-id>.ndjson (self-describing _meta
-# header first line). A machine with no prior entry seeds its baseline & passes.
+# Results are deliberately separate:
+#   bench/<machine-id>.performance.ndjson
+#   bench/<machine-id>.complexity.ndjson
+# The legacy combined <machine-id>.ndjson is preserved as historical data.
 #
 # Never use `set -e` (masks intended non-zero exits). `set -u` alone.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
+source "$SCRIPT_DIR/bench/policy.bash"
 
 # Re-exec inside the dev shell if the benchmark tooling isn't on PATH.
-if ! command -v hyperfine >/dev/null 2>&1 || ! command -v luajit >/dev/null 2>&1; then
+if ! command -v hyperfine >/dev/null 2>&1 \
+	|| ! command -v luajit >/dev/null 2>&1 \
+	|| ! command -v zig >/dev/null 2>&1; then
 	if command -v nix >/dev/null 2>&1; then
 		exec nix develop -c "$0" "$@"
 	fi
@@ -43,8 +49,13 @@ cpu_model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //')
 [ -n "$cpu_model" ] || cpu_model=$(uname -m)
 machine_id=$(printf '%s|%s|%s' "$(hostname 2>/dev/null)" "$(uname -m)" "$cpu_model" \
 	| sha256sum | head -c 12)
-NDJSON="$SCRIPT_DIR/bench/${machine_id}.ndjson"
+PERFORMANCE_NDJSON="$SCRIPT_DIR/bench/${machine_id}.performance.ndjson"
+COMPLEXITY_NDJSON="$SCRIPT_DIR/bench/${machine_id}.complexity.ndjson"
 now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+os_name=$(uname -s)
+kernel_release=$(uname -r)
+architecture=$(uname -m)
+zig_version=$(zig version)
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  romantic_collation benchmark — machine ${machine_id}                     "
@@ -76,8 +87,11 @@ else
 fi
 
 ICU_BIN=""
-if icu_flags=$(pkg-config --cflags --libs icu-uc icu-i18n 2>/dev/null) && \
-   cc -O2 -std=c11 -Wall -Wextra -o "$WORK/icu_sort" bench/icu_sort.c $icu_flags 2>"$WORK/icu.log"; then
+if icu_flags=$(pkg-config --cflags --libs icu-uc icu-i18n 2>/dev/null); then
+	read -r -a icu_flags_array <<< "$icu_flags"
+fi
+if [[ -n "${icu_flags:-}" ]] && \
+   cc -O2 -std=c11 -Wall -Wextra -o "$WORK/icu_sort" bench/icu_sort.c "${icu_flags_array[@]}" 2>"$WORK/icu.log"; then
 	ICU_BIN="$WORK/icu_sort"
 else
 	echo "note: ICU harness did not compile (skipping):" >&2
@@ -122,10 +136,16 @@ fi
 
 # ── Run hyperfine (fails loudly if any contestant errors) ────────────────
 echo ""
-echo "━━━ Part A: comparison (hyperfine -N --warmup $WARMUP, median wall-clock) ━━━"
+echo "━━━ Part A: performance telemetry (non-blocking; wall + CPU time) ━━━"
 CSV="$WORK/results.csv"
-hyperfine -N --warmup "$WARMUP" --export-csv "$CSV" "${wrappers[@]}" 2>&1 \
-	| grep -vE '^\s*$' | tail -n +1
+hyperfine -N --warmup "$WARMUP" --export-csv "$CSV" "${wrappers[@]}" \
+	>"$WORK/performance.out" 2>&1
+hyperfine_rc=$?
+grep -vE '^\s*$' "$WORK/performance.out"
+if [[ $hyperfine_rc -ne 0 ]]; then
+	echo "PERFORMANCE TELEMETRY: FAIL — a contestant did not run successfully" >&2
+	exit 1
+fi
 
 # ── Parse CSV, print table, append ndjson ────────────────────────────────
 # hyperfine CSV columns: command,mean,stddev,median,user,system,min,max
@@ -134,41 +154,54 @@ mapfile -t rows < <(tail -n +2 "$CSV")
 
 # baseline = collate-house median for relative speed
 house_median=""
-declare -a medians mins means stddevs
+declare -a medians mins means stddevs users systems
 for i in "${!names[@]}"; do
-	IFS=',' read -r _cmd mean stddev median user sys min max <<<"${rows[$i]}"
-	medians[$i]="$median"; mins[$i]="$min"; means[$i]="$mean"; stddevs[$i]="$stddev"
+	IFS=',' read -r _cmd mean stddev median user sys min _max <<<"${rows[$i]}"
+	medians[i]="$median"; mins[i]="$min"; means[i]="$mean"; stddevs[i]="$stddev"
+	users[i]="$user"; systems[i]="$sys"
 	[ "${names[$i]}" = "collate-house" ] && house_median="$median"
 done
 
 echo ""
 printf '%-34s %12s %12s %10s\n' "contestant" "median(ms)" "min(ms)" "vs house"
 printf '%-34s %12s %12s %10s\n' "----------" "----------" "-------" "--------"
-# Ensure ndjson has a self-describing header.
-if [ ! -f "$NDJSON" ]; then
+# Ensure performance telemetry has a self-describing header.
+if [ ! -f "$PERFORMANCE_NDJSON" ]; then
 	mkdir -p "$SCRIPT_DIR/bench"
-	printf '{"_meta":"romantic_collation benchmark results — wall-clock seconds, hyperfine; one record per contestant per run","machine":"%s","cpu":%s,"schema":1,"generated_by":"./bm"}\n' \
-		"$machine_id" "$(printf '%s' "$cpu_model" | luajit -e 'io.write(string.format("%q", io.read("*a")))' 2>/dev/null || echo "\"$cpu_model\"")" \
-		>> "$NDJSON"
-	seeded=1
+	printf '{"_meta":"fixed-workload implementation-performance telemetry; non-blocking by default","kind":"performance","machine":"%s","cpu":%s,"os":"%s","kernel":"%s","arch":"%s","zig":"%s","build":"ReleaseFast","schema":2,"generated_by":"./bm"}\n' \
+		"$machine_id" "$(printf '%s' "$cpu_model" | luajit -e 'io.write(string.format("%q", io.read("*a")))')" \
+		"$os_name" "$kernel_release" "$architecture" "$zig_version" \
+		>> "$PERFORMANCE_NDJSON"
 fi
 for i in "${!names[@]}"; do
 	med_ms=$(awk -v v="${medians[$i]}" 'BEGIN{printf "%.2f", v*1000}')
 	min_ms=$(awk -v v="${mins[$i]}"    'BEGIN{printf "%.2f", v*1000}')
 	rel=$(awk -v a="${medians[$i]}" -v b="$house_median" 'BEGIN{ if(b>0) printf "%.2fx", a/b; else print "-"}')
 	printf '%-34s %12s %12s %10s\n' "${names[$i]}" "$med_ms" "$min_ms" "$rel"
-	printf '{"ts":"%s","n":%d,"contestant":"%s","median_s":%s,"min_s":%s,"mean_s":%s,"stddev_s":%s}\n' \
-		"$now_iso" "$BM_N" "${names[$i]}" "${medians[$i]}" "${mins[$i]}" "${means[$i]}" "${stddevs[$i]}" \
-		>> "$NDJSON"
+	printf '{"ts":"%s","kind":"performance","n":%d,"seed":%d,"contestant":"%s","wall_median_s":%s,"wall_min_s":%s,"wall_mean_s":%s,"wall_stddev_s":%s,"cpu_user_s":%s,"cpu_system_s":%s}\n' \
+		"$now_iso" "$BM_N" "$BM_SEED" "${names[$i]}" "${medians[$i]}" "${mins[$i]}" "${means[$i]}" "${stddevs[$i]}" "${users[$i]}" "${systems[$i]}" \
+		>> "$PERFORMANCE_NDJSON"
 done
 
-# ── Part B: scaling gate (machine-independent, O(n log n)) ────────────────
+# ── Part B: complexity gate (within-run growth ratios, O(n log n)) ────────
 echo ""
-echo "━━━ Part B: scaling gate — collate house style at N,2N,4N,8N ━━━"
-echo "complexity claim: O(n log n)  ⇒  per-doubling ratio ≈ 2 (fail on ≥ 3)"
+echo "━━━ Part B: complexity gate — collate house style at N,2N,4N,8N ━━━"
+echo "complexity claim: O(n log n) ⇒ ratio ≈ 2; require [${COMPLEXITY_RATIO_MIN}, ${COMPLEXITY_RATIO_MAX})"
 base=$BM_SCALE_BASE
 declare -a sizes=("$base" "$((base*2))" "$((base*4))" "$((base*8))")
 declare -a scale_median
+
+# Measure empty-process startup independently. The smallest complexity workload
+# must be at least 5x this value so fixed launch cost is at most 20% of total.
+empty_corpus="$WORK/empty.txt"
+: > "$empty_corpus"
+empty_wrapper="$WORK/empty_wrap"
+printf '#!/usr/bin/env bash\nexec %q %q >/dev/null 2>&1\n' "$COLLATE" "$empty_corpus" > "$empty_wrapper"
+chmod +x "$empty_wrapper"
+empty_csv="$WORK/empty.csv"
+hyperfine -N --warmup 2 --min-runs 5 --export-csv "$empty_csv" "$empty_wrapper" >/dev/null 2>&1
+startup_median=$(awk -F, 'NR==2{print $4}' "$empty_csv")
+
 for idx in "${!sizes[@]}"; do
 	n="${sizes[$idx]}"
 	c="$WORK/scale_${n}.txt"
@@ -179,34 +212,55 @@ for idx in "${!sizes[@]}"; do
 	scsv="$WORK/scale_${n}.csv"
 	hyperfine -N --warmup 2 --min-runs 5 --export-csv "$scsv" "$w" >/dev/null 2>&1
 	m=$(awk -F, 'NR==2{print $4}' "$scsv")
-	scale_median[$idx]="$m"
+	scale_median[idx]="$m"
 	printf '  N=%-8d median=%8.2f ms\n' "$n" "$(awk -v v="$m" 'BEGIN{print v*1000}')"
 done
 
 gate_fail=0
+work_to_startup=$(awk -v work="${scale_median[0]}" -v startup="$startup_median" \
+	'BEGIN{if(startup>0) printf "%.3f", work/startup; else print "0"}')
+workload_verdict=$(complexity_workload_verdict "$work_to_startup")
+printf '\n  startup control: N=%d is %sx empty-process median (require ≥ %sx)   %s\n' \
+	"$base" "$work_to_startup" "$COMPLEXITY_WORK_TO_STARTUP_MIN" "$workload_verdict"
+if [[ "$workload_verdict" == "fail" ]]; then gate_fail=1; fi
+
+# Ensure complexity results have their own self-describing stream.
+if [ ! -f "$COMPLEXITY_NDJSON" ]; then
+	mkdir -p "$SCRIPT_DIR/bench"
+	printf '{"_meta":"within-run algorithmic-complexity controls","kind":"complexity","machine":"%s","cpu":%s,"os":"%s","kernel":"%s","arch":"%s","zig":"%s","build":"ReleaseFast","claim":"O(n log n)","ratio_min":%s,"ratio_max_exclusive":%s,"work_to_startup_min":%s,"schema":2,"generated_by":"./bm"}\n' \
+		"$machine_id" "$(printf '%s' "$cpu_model" | luajit -e 'io.write(string.format("%q", io.read("*a")))')" \
+		"$os_name" "$kernel_release" "$architecture" "$zig_version" \
+		"$COMPLEXITY_RATIO_MIN" "$COMPLEXITY_RATIO_MAX" "$COMPLEXITY_WORK_TO_STARTUP_MIN" \
+		>> "$COMPLEXITY_NDJSON"
+fi
+printf '{"ts":"%s","kind":"complexity","measurement":"startup_control","base_n":%d,"seed":%d,"startup_median_s":%s,"base_median_s":%s,"work_to_startup":%s,"verdict":"%s"}\n' \
+	"$now_iso" "$base" "$BM_SEED" "$startup_median" "${scale_median[0]}" "$work_to_startup" "$workload_verdict" \
+	>> "$COMPLEXITY_NDJSON"
+
 echo ""
 echo "  per-doubling ratios:"
 for idx in 1 2 3; do
 	prev="${scale_median[$((idx-1))]}"
 	cur="${scale_median[$idx]}"
 	ratio=$(awk -v a="$cur" -v b="$prev" 'BEGIN{ if(b>0) printf "%.3f", a/b; else print "0"}')
-	verdict="ok"
-	over=$(awk -v r="$ratio" 'BEGIN{print (r>=3.0)?1:0}')
-	if [ "$over" = "1" ]; then verdict="FAIL (super-linear/quadratic)"; gate_fail=1; fi
-	printf '    %d→%d : %sx   %s\n' "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$ratio" "$verdict"
-	printf '{"ts":"%s","kind":"scaling","from_n":%d,"to_n":%d,"ratio":%s}\n' \
-		"$now_iso" "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$ratio" >> "$NDJSON"
+	verdict=$(complexity_ratio_verdict "$ratio")
+	failure_kind=$(complexity_ratio_failure_kind "$ratio")
+	if [[ "$verdict" == "fail" ]]; then gate_fail=1; fi
+	printf '    %d→%d : %sx   %s' "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$ratio" "$verdict"
+	if [[ "$failure_kind" != "none" ]]; then printf ' (%s)' "$failure_kind"; fi
+	printf '\n'
+	printf '{"ts":"%s","kind":"complexity","measurement":"doubling","seed":%d,"from_n":%d,"to_n":%d,"from_median_s":%s,"to_median_s":%s,"ratio":%s,"verdict":"%s"}\n' \
+		"$now_iso" "$BM_SEED" "${sizes[$((idx-1))]}" "${sizes[$idx]}" "$prev" "$cur" "$ratio" "$verdict" \
+		>> "$COMPLEXITY_NDJSON"
 done
 
 echo ""
-if [ "${seeded:-0}" = "1" ]; then
-	echo "  (new machine $machine_id — seeded baseline ndjson, passing)"
-fi
-echo "  ndjson log: $NDJSON"
+echo "  performance log: $PERFORMANCE_NDJSON"
+echo "  complexity log:  $COMPLEXITY_NDJSON"
 echo ""
 if [ "$gate_fail" = "1" ]; then
-	echo "SCALING GATE: FAIL — sort path grew super-linearly; investigate before shipping." >&2
+	echo "COMPLEXITY GATE: FAIL — growth shape or startup control left its declared bounds." >&2
 	exit 1
 fi
-echo "SCALING GATE: PASS (sub-quadratic across all doublings)"
+echo "COMPLEXITY GATE: PASS (startup controlled; every doubling in [${COMPLEXITY_RATIO_MIN}, ${COMPLEXITY_RATIO_MAX}))"
 exit 0

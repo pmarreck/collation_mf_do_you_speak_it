@@ -154,9 +154,16 @@ returns `RCOL_BUFFER_TOO_SMALL`, reports `required`, and remains untouched.
 
 ## Benchmarks
 
-Run `./bm` (uses `hyperfine` from the dev shell; logs to
-`bench/<machine-id>.ndjson`). It compares `collate` against independent oracles
-and runs a machine-independent scaling gate.
+Run `./bm` (uses `hyperfine` from the dev shell). It records two deliberately
+separate streams:
+
+- `bench/<machine-id>.performance.ndjson` contains non-blocking fixed-workload
+  wall-clock and CPU-time telemetry for `collate` and independent competitors.
+- `bench/<machine-id>.complexity.ndjson` contains the blocking `N, 2N, 4N, 8N`
+  growth control. Each doubling must stay in `[1.5, 3.0)`, and the smallest
+  workload must take at least 5× empty-process startup time.
+
+The original combined `<machine-id>.ndjson` remains as historical data.
 
 Measured — 50,000 realistic mixed lines, AMD Threadripper 3990X, hyperfine median:
 

@@ -62,6 +62,10 @@ run_suite "Zig Unit Tests" "$zig_test_cmd"
 # cannot produce on demand.
 run_suite "C CLI Adapter Unit Tests" "$c_test_cmd"
 
+# Benchmark policy is pure classification and belongs in the ordinary suite;
+# actual timing remains exclusive to ./bm.
+run_suite "Benchmark Policy Unit Tests" "bash '$SCRIPT_DIR/tests/unit/benchmark_policy.sh'"
+
 # Integration tests (CLI surface) — add as they're written
 for t in "$SCRIPT_DIR"/tests/integration/*.sh; do
 	[[ -f "$t" ]] || continue
