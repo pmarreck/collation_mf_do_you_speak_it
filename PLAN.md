@@ -382,6 +382,10 @@ Current test count: 369 passed, 0 failed (95 Zig unit + 3 C unit + 6 benchmark-p
             all five mathematical digit styles. Rank, `℅`, and fullwidth-digit
             mutations all failed; the restored 200,000-iteration run passed
             1,737,615 checks. (2026-08-13 16:43 EDT)
+      - [x] Remove the absorbed `GROK_FEEDBACK.md` review artifact after Peter's
+            approval; recoverable copy moved to
+            `~/.Trash/GROK_FEEDBACK-complete-20260827T1759EDT.md`.
+            (2026-08-27 17:59 EDT)
 - [ ] **Compatibility folding of LETTERS** (Peter's "what about other letter-like
       things?", 2026-07-31). Digits are done; the letter side remains. Fullwidth
       digits were one instance of a much larger, but BOUNDED and
